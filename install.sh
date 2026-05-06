@@ -3,20 +3,20 @@
 # AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI).
 #
 # Usage (one-liner — no clone required):
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude
 #
 #   # Install for several CLIs at once:
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude,opencode,kilo
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude,opencode,kilo
 #
 #   # Pin a specific tag/branch/SHA:
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude --ref v1.0.0
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude --ref v1.0.0
 #
 #   # Inspect before installing:
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude --list
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude --list
 #
 #   # Remove what this script previously installed (everything, or per-CLI):
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --uninstall
-#   curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --uninstall --for claude
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --uninstall
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --uninstall --for claude
 #
 # What it does:
 #   1. Fetches the repo at the chosen ref (tarball via curl, or `git clone` fallback).
@@ -48,8 +48,8 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 # ---- defaults -------------------------------------------------------------
-REPO="${AGENT_SKILLS_REPO:-AlastairThomson/AgentSkills}"
-REF="${AGENT_SKILLS_REF:-main}"
+REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
+REF="${AGENT_SKILLS_REF:-release}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
 FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini
 FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path to source tree (skips fetch)
