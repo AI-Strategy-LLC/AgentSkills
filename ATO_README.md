@@ -218,7 +218,7 @@ First, log in:
 
 ```bash
 aws sso login --profile <your-profile>
-m365 login --authType deviceCode
+m365 login --authType [deviceCode|browser]
 ```
 
 Then:
@@ -258,7 +258,7 @@ All flags live on `/ato-artifact-collector`. The `ato-vulnerability-scanner` sta
 | `--repo` | Mark repo scope explicitly. Always implied — the flag exists to make "repo-only, skip the interview" expressible. |
 | `--aws` | Enable the AWS source. Skips the AWS y/N prompt. Requires ambient `aws` CLI auth. |
 | `--azure` | Enable the Azure source. Skips the Azure y/N prompt. Requires ambient `az` CLI auth. |
-| `--sharepoint` | Enable the SharePoint / M365 source. Skips the SharePoint y/N prompt. Requires ambient `m365` CLI auth. |
+| `--sharepoint sites:[<Site URL>]` | Enable the SharePoint / M365 source. Skips the SharePoint y/N prompt. Requires ambient `m365` CLI auth. |
 | `--smb` | Enable the SMB source. Skips the SMB y/N prompt. Requires OS mount helpers configured. |
 
 **Precedence rule.** If **any** source flag is present, the interactive scope-confirmation interview is skipped entirely; unflagged sources are disabled. If no source flags are present, the orchestrator falls back to interactive y/N prompts for any source not explicitly disabled in config.
@@ -560,7 +560,7 @@ Verify with `aws sts get-caller-identity` before launching the orchestrator. Reg
 ```bash
 az login --use-device-code
 # or via a user-owned helper (e.g. an org-internal credential broker):
-~/Applications/bin/azureauth
+E.g. a helper that executes the CLI for your password vault to inject the crdentials
 ```
 
 Verify with `az account show`. Region scope is the Azure US allow-list (`eastus`, `eastus2`, `centralus`, `northcentralus`, `southcentralus`, `westus`, `westus2`, `westus3`, `usgovvirginia`, `usgovtexas`, `usgovarizona`, `usdodeast`, `usdodcentral`).
@@ -570,7 +570,7 @@ The Azure source supports a configurable `helper_command` in the auth config —
 ### SharePoint / M365
 
 ```bash
-m365 login --authType deviceCode
+m365 login --authType browser (for interative)
 ```
 
 Verify with `m365 status`. No region restriction — Microsoft 365 is tenant-scoped. Service-account auth and pre-established sessions are supported via `auth.method: service-account` or `existing` in config.
