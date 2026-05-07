@@ -1,6 +1,6 @@
 ---
 name: ato-artifact-collector
-description: "Collect, generate, and index NIST 800-53 security artifacts from a code repository for federal ATO (Authority to Operate) package preparation. Use whenever the user mentions ATO, NIST 800-53, security package, SSP artifacts, FedRAMP evidence collection, compliance artifacts, security documentation gathering, ATO readiness, compliance gaps, or security documentation completeness for a federal system. Even a casual 'collect security artifacts' or 'what do I need for my ATO' should trigger this skill. Accepts CLI-style flags (--repo / --no-repo / --aws / --azure / --sharepoint / --smb / --no-vuln-scan / --remediation / --poam) to bypass the interactive scope-confirmation interview; falls back to the interview when no source flags are present. Confirms scope, then delegates the multi-step collection to the ato-artifact-collector agent."
+description: "Collect, generate, and index NIST 800-53 security artifacts from a code repository for federal ATO (Authority to Operate) package preparation. Use whenever the user mentions ATO, NIST 800-53, security package, SSP artifacts, FedRAMP evidence collection, compliance artifacts, security documentation gathering, ATO readiness, compliance gaps, or security documentation completeness for a federal system. Even a casual 'collect security artifacts' or 'what do I need for my ATO' should trigger this skill. Accepts CLI-style flags (--repo / --no-repo / --aws / --azure / --sharepoint / --onedrive / --smb / --no-vuln-scan / --remediation / --poam) to bypass the interactive scope-confirmation interview; falls back to the interview when no source flags are present. Confirms scope, then delegates the multi-step collection to the ato-artifact-collector agent."
 ---
 
 # ATO Artifact Collector
@@ -17,7 +17,8 @@ Before doing anything else, parse the user's invocation arguments for the follow
 | `--no-repo` | **Disable** the repo as a source: skip Step 1.5 (vuln scan needs the repo), skip Step 2 (Discover), skip Step 3 repo-file collection, and skip Step 5 (Deep Code Analysis). Steps 4, 6, 6.5–6.7, 7, and 8 still run, working purely from sibling-collected evidence. **Implies `--no-vuln-scan`** (the scanner has nothing to scan) — log `[INFO] --no-repo implies --no-vuln-scan; disabling vuln scan.` and proceed. **Requires at least one external source flag** (`--aws`, `--azure`, `--sharepoint`, `--smb`); a bare `--no-repo` with no external source is a usage error — print the available external flags and exit non-zero. |
 | `--aws` | Enable the AWS source. Skip the AWS y/N prompt. Requires ambient `aws` CLI auth and `ato-source-aws` installed. |
 | `--azure` | Enable the Azure source. Skip the Azure y/N prompt. Requires ambient `az` CLI auth and `ato-source-azure` installed. |
-| `--sharepoint` | Enable the SharePoint / M365 source. Skip the SharePoint y/N prompt. Requires ambient `m365` CLI auth and `ato-source-sharepoint` installed. |
+| `--sharepoint` | Enable the SharePoint / M365 site source. Skip the SharePoint y/N prompt. Requires ambient `m365` CLI auth and `ato-source-sharepoint` installed. |
+| `--onedrive` | Enable the OneDrive (per-user personal SharePoint sites) source. Skip the OneDrive y/N prompt. Requires ambient `m365` CLI auth, `ato-source-onedrive` installed, and the logged-in identity to have delegated access to each configured user's OneDrive. Independent from `--sharepoint` — the two flags can be set together or separately. |
 | `--smb` | Enable the SMB / Windows-share source. Skip the SMB y/N prompt. Requires mount helpers and `ato-source-smb` installed. |
 | `--no-vuln-scan` | Disable the pre-collection vulnerability scan. By default the scan runs every collection (between Step 1 and Step 2 of the agent workflow). |
 | `--no-assessment` | Disable the per-Determine-If-ID assessment pass (Step 6.5) AND synthesis (Step 6.6). The orchestrator still emits the `<cf>-implementation.md` family narrative with H3 sub-sections + Determine If Statement, but skips Findings/Result and emits a 7-column CSV (no `Result`/`Findings` columns) instead of the 9-column GRC default. |
@@ -28,11 +29,11 @@ Before doing anything else, parse the user's invocation arguments for the follow
 
 ### Precedence rule
 
-**Any source flag (`--repo`, `--no-repo`, `--aws`, `--azure`, `--sharepoint`, `--smb`) means: skip the interactive interview entirely and treat unflagged sources as disabled.** This matches CLI-tool conventions (explicit flags are authoritative; absence means off). If no source flags are present, fall through to the interview in Step 1.
+**Any source flag (`--repo`, `--no-repo`, `--aws`, `--azure`, `--sharepoint`, `--onedrive`, `--smb`) means: skip the interactive interview entirely and treat unflagged sources as disabled.** This matches CLI-tool conventions (explicit flags are authoritative; absence means off). If no source flags are present, fall through to the interview in Step 1.
 
 `--repo` on its own counts as a source flag — it triggers the same skip-interview behavior, with all four external sources disabled. The repo source is enabled by default in flag mode unless `--no-repo` is passed; `--repo` is therefore optional when at least one external source flag is set, but it's still a useful self-documenting hint.
 
-`--no-repo` disables the repo source. It must combine with at least one of `--aws / --azure / --sharepoint / --smb`; on its own it's a usage error (no sources at all). It implies `--no-vuln-scan` and is incompatible with `--repo` (combining them is a usage error — print which one wins and exit).
+`--no-repo` disables the repo source. It must combine with at least one of `--aws / --azure / --sharepoint / --onedrive / --smb`; on its own it's a usage error (no sources at all). It implies `--no-vuln-scan` and is incompatible with `--repo` (combining them is a usage error — print which one wins and exit).
 
 `--no-vuln-scan`, `--no-assessment`, `--no-synthesize`, `--accept-synthesized`, `--remediation`, and `--poam` are output-control flags (they don't affect source selection). They can combine with the interview path or the flag path freely. `--no-assessment` implies `--no-synthesize` (synthesis depends on Findings).
 
@@ -49,8 +50,11 @@ Before doing anything else, parse the user's invocation arguments for the follow
 | `--repo --no-assessment` | Skip interview, repo only, no per-sub-control assessment scaffolding (smaller CSV without Result/Findings columns) |
 | `--repo --no-synthesize` | Skip interview, repo only, assessment runs but no synthesized drafts written |
 | `--repo --accept-synthesized` | Skip interview, repo only, synthesis on, drafts auto-promoted to evidence (loud signaling) |
-| `--aws --azure --sharepoint --smb --remediation --poam` | Full external collection + auto-remediation + POAM (no interview) |
+| `--aws --azure --sharepoint --onedrive --smb --remediation --poam` | Full external collection (all five external sources) + auto-remediation + POAM (no interview) |
+| `--repo --sharepoint --onedrive` | Skip interview, repo + SharePoint sites + per-user OneDrive evidence |
+| `--onedrive` | Skip interview, OneDrive only (repo still on by default) |
 | `--no-repo --sharepoint` | Skip interview, SharePoint only (no repo discovery, no deep code analysis, no vuln scan), no remediation, no POAM |
+| `--no-repo --sharepoint --onedrive` | Skip interview, both M365 sources only, no repo, no vuln scan |
 | `--no-repo --smb --aws` | Skip interview, SMB + AWS only, no repo, no vuln scan, no remediation, no POAM |
 | `--no-repo` (alone) | **Usage error** — no sources to collect from. Print the external-source flags and exit non-zero. |
 | `--repo --no-repo` | **Usage error** — contradictory flags. Print the conflict and exit non-zero. |
@@ -64,7 +68,8 @@ Otherwise, establish which external sources the user wants to scan:
 - **Repo only** (first-class default) — no external sources; the agent scans just the current repo.
 - **AWS** — requires ambient `aws` CLI auth and `ato-source-aws` sibling installed.
 - **Azure** — requires ambient `az` CLI auth and `ato-source-azure` sibling installed.
-- **SharePoint / M365** — requires ambient `m365` CLI auth and `ato-source-sharepoint` sibling installed.
+- **SharePoint / M365** — team SharePoint sites; requires ambient `m365` CLI auth and `ato-source-sharepoint` sibling installed.
+- **OneDrive for Business** — per-user OneDrive personal sites; requires ambient `m365` CLI auth, `ato-source-onedrive` sibling installed, and delegated access to each configured user's OneDrive.
 - **SMB file shares** — requires mount helpers and `ato-source-smb` sibling installed.
 
 Ask the user which apply. If an `.ato-package.yaml` exists at the repo root, read it and confirm the settings with the user rather than re-asking from scratch.
@@ -82,6 +87,17 @@ Required prompts when `.ato-package.yaml` is missing or has no `libraries:` bloc
 4. **Optional folder filter per library** — `Restrict to specific folders within <library>? (comma-separated folder paths, or leave blank to scan the entire library)`
 
 The scope object the orchestrator passes to the SharePoint sibling is the new shape (sites + libraries + folders[site][library]); the sibling rejects with `scope_invalid` if libraries are missing.
+
+### OneDrive-specific scope prompts
+
+When OneDrive is enabled (via `--onedrive` or interactive answer), the scope object MUST identify which users' OneDrives to scan. Unlike SharePoint, there is no shared "site" — each user's OneDrive is a separate personal site. Required prompts when `.ato-package.yaml` is missing or has no `onedrive.users:` block:
+
+1. **Tenant** — same prompt as SharePoint; reuse the answer when both are enabled.
+2. **User UPN(s)** — `Which user OneDrive(s) hold the ATO evidence? (UPNs, comma-separated, e.g. 'alice@contoso.onmicrosoft.com, bob@contoso.onmicrosoft.com')`
+3. **Optional folder filter per user** — `Restrict to specific folders within <user>'s OneDrive? (comma-separated folder paths under /Documents, or leave blank to scan /Documents recursively)`
+4. **Delegated-access reminder** — print: `Note: each configured user's OneDrive must already be shared with the logged-in identity. The skill does not request access; it records 403s as partial failures and moves on.`
+
+The scope object the orchestrator passes to the OneDrive sibling has shape `{tenant, users[], folders[user][]}`; the sibling rejects with `scope_invalid` if `users` is missing or empty.
 
 ### Working repo's license / visibility is irrelevant to scope
 

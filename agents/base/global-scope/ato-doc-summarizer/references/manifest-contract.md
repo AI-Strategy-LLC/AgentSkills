@@ -49,7 +49,9 @@ Every entry in `files[]` has these fields:
 | `mtime` | yes | Last-modified timestamp, ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`). Pass-through. |
 | `type` | yes | Lowercased file extension without the leading dot (`pdf`, `docx`, `md`, `txt`, etc.). The agent uses this as a hint when interpreting the excerpt. |
 | `excerpt_file` | yes | Path to the excerpt text, **relative to the manifest file's directory**. The agent resolves this to an absolute path before reading. |
+| `cache_file` | optional | Path (relative to manifest's directory) to the downloaded original, when the source pre-downloads candidates into a cache for later COPY (SharePoint, OneDrive). For sources that read in place (SMB), this field is absent. The summarizer agent ignores this field; the calling skill's COPY step uses it to move the original from cache to evidence/ without re-fetching. |
 | `filename_hint` | optional | Slug like `ssp-sections/08-contingency-plan` if the extractor wants to suggest a family from the filename. The agent treats this as a tie-breaker, not as ground truth. Empty string `""` means "no hint." |
+| `source_meta` | optional | Free-form object of source-specific metadata that round-trips through to the calling skill (e.g. `site_url` for SharePoint, `user_upn` for OneDrive). The summarizer agent ignores this; the skill's COPY / EMIT steps may use it. |
 
 ## `skipped[]` entries
 

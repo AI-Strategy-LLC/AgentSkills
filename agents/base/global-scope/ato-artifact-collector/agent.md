@@ -157,22 +157,27 @@ source disabled — if it does, log a loud error and exit before Step 1.5.
 
 ### Orchestrating sibling skills
 
-External sources (SharePoint/M365, AWS, Azure, SMB shares) are collected by
-**separate sibling skills**, not by this orchestrator directly. After Step 0 builds
-the scope object, Step 1 orients, and Step 1.5 (if enabled) writes the vulnerability
-baseline, this skill invokes each enabled sibling via the Skill tool, e.g.:
+External sources (SharePoint sites, OneDrive personal sites, AWS, Azure, SMB
+shares) are collected by **separate sibling skills**, not by this
+orchestrator directly. After Step 0 builds the scope object, Step 1 orients,
+and Step 1.5 (if enabled) writes the vulnerability baseline, this skill
+invokes each enabled sibling via the Skill tool, e.g.:
 
-- `skill: "ato-source-sharepoint"` with the resolved sharepoint scope
+- `skill: "ato-source-sharepoint"` with the resolved sharepoint scope (team sites + libraries)
+- `skill: "ato-source-onedrive"` with the resolved onedrive scope (per-user personal sites)
 - `skill: "ato-source-aws"` with the resolved aws scope
 - `skill: "ato-source-azure"` with the resolved azure scope
 - `skill: "ato-source-smb"` with the resolved smb scope
 
-Each sibling is read-only, ambient-auth, and confirms its own scope in-session
-before making any external call. They write evidence files into either
-`docs/ato-package/ssp-sections/{NN}-{slug}/evidence/` or
+SharePoint and OneDrive both speak `m365` but are separate siblings: SharePoint
+scopes are sites + libraries (team-shared), OneDrive scopes are users + folders
+(per-user delegated). The flags `--sharepoint` and `--onedrive` control them
+independently. Each sibling is read-only, ambient-auth, and confirms its own
+scope in-session before making any external call. They write evidence files
+into either `docs/ato-package/ssp-sections/{NN}-{slug}/evidence/` or
 `docs/ato-package/controls/{CF}-{slug}/evidence/{CONTROL-ID}/`, source-prefixed
-(`sharepoint_*`, `aws_*`, `azure_*`, `smb_*`), and a citation batch into
-`docs/ato-package/.staging/{source}-citations.json`. The full contract lives in
+(`sharepoint_*`, `onedrive_*`, `aws_*`, `azure_*`, `smb_*`), and a citation
+batch into `docs/ato-package/.staging/{source}-citations.json`. The full contract lives in
 `references/sibling-contract.md`. Siblings run after Orient (Step 1) and before
 Generate (Step 4), so their evidence is visible to generation. If a sibling fails
 (auth missing, scope rejected), the orchestrator records the failure and continues
