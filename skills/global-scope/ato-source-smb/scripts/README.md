@@ -1,8 +1,82 @@
-# SMB Pre-Scan Scripts
+# SMB Helper Scripts
 
-Helper scripts the `ato-source-smb` skill invokes during its PRE-SCAN step.
-These do the rote walk-and-extract work outside any LLM context so document
-text never lands in the orchestrator's main conversation.
+Helper scripts the `ato-source-smb` skill invokes. Each one does rote work
+outside any LLM context — host probing, walking, text extraction — so the
+orchestrator's main conversation never sees the noisy intermediate output.
+
+| Script | Phase in the skill | Purpose |
+|---|---|---|
+| `smb-probe-host.sh` | Step 2b (VALIDATE) | Pre-mount existence check: parse UNC/URL, DNS-resolve, TCP-probe port 445 |
+| `smb-walk-extract.sh` | Step 4.5a (PRE-SCAN) | Walk mounted share, extract first-pages text excerpts, emit manifest for `ato-doc-summarizer` |
+
+## `smb-probe-host.sh`
+
+Pre-mount reachability probe. Run during the SMB skill's Step 2 (VALIDATE)
+before the skill commits to mounting any share — fails fast on typo'd
+hostnames, VPN-not-connected, or firewall-blocked targets, and saves the
+operator from waiting on a slow `mount_smbfs` failure.
+
+### Required tools
+
+None hard-required. The script tries multiple resolvers and probers in
+priority order and degrades gracefully (`resolves: "skipped"` /
+`port_445: "skipped"`) when none are available.
+
+| Probe | Tools tried (in order) |
+|---|---|
+| DNS resolution | `getent` (Linux) → `dscacheutil` (macOS) → `host` → `dig` → `nslookup` → `python3` |
+| TCP probe to port 445 | `nc` (BSD `-G` first, then GNU `-w`) → `bash` `/dev/tcp` + `timeout` / `gtimeout` |
+
+`jq` is used for JSON output if present; falls back to a hand-rolled
+printf format otherwise.
+
+### Usage
+
+```bash
+smb-probe-host.sh "//fileserver.corp/ato"
+smb-probe-host.sh "smb://fileserver.corp/ato/Current"
+smb-probe-host.sh '\\fileserver.corp\ato\Current'
+```
+
+All three forms parse to the same canonical UNC. The script accepts a
+single positional argument; it does not take flags.
+
+### Output (stdout)
+
+```json
+{
+  "input": "smb://fileserver.corp/ato/Current",
+  "host": "fileserver.corp",
+  "share": "ato",
+  "path": "Current",
+  "scheme": "smb",
+  "normalized_unc": "//fileserver.corp/ato/Current",
+  "resolves": "true",
+  "resolves_via": "getent",
+  "port_445": "open",
+  "port_445_via": "nc"
+}
+```
+
+`resolves` is `"true"` / `"false"` / `"skipped"`; `port_445` is `"open"` /
+`"closed"` / `"skipped"`. The skill caller pipes this into a
+per-share `.staging/smb-probe-{share-name}.json` file.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Both probes ok, or at least one was skipped (best-effort, no clear failure) |
+| `1` | DNS clearly failed — host did not resolve |
+| `2` | TCP probe clearly failed — port 445 closed / host unreachable |
+| `64` | Usage error (no argument, or input doesn't start with `//`, `\\`, or `smb://`) |
+
+### What this script does NOT do
+
+- **No SMB protocol calls.** Only TCP-handshakes the port; doesn't list
+  shares, doesn't authenticate, doesn't speak SMB.
+- **No credentials.** Pure ambient network probe.
+- **No mount.** The skill's Step 4 (per-OS) does the actual mount.
 
 ## `smb-walk-extract.sh`
 

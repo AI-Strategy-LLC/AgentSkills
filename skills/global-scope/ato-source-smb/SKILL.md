@@ -135,8 +135,12 @@ esac
 }
 ```
 
-Validate:
-- every `shares[].unc` starts with `//` or `\\` (double-slash or double-backslash)
+### 2a — Structural validation
+
+- every `shares[].unc` is a UNC/URL location in one of three accepted forms:
+  - URL form: `smb://hostname/share[/path]`
+  - POSIX-UNC: `//hostname/share[/path]`
+  - Windows-UNC: `\\hostname\share[\path]`
 - `mount_point` (if present) does not escape the user's home directory
 - `credentials_helper` ∈ {keychain, kerberos, prompt, cmdkey}
   - `keychain` — macOS Keychain entry (user sets it up via Finder → Connect to Server)
@@ -149,11 +153,47 @@ Validate:
 - `depth` is an integer in [1, 10]
 - `file_types` is non-empty
 
+### 2b — Pre-mount existence probe
+
+For each share entry, run `scripts/smb-probe-host.sh` against `shares[].unc`.
+The script normalises all three accepted forms into a canonical
+`//host/share[/path]`, DNS-resolves the host, and TCP-probes port 445. No
+credentials are involved — this is a pure reachability check before the
+skill commits to a mount.
+
+```bash
+"$skill_dir/scripts/smb-probe-host.sh" "$UNC" > "$STAGING_DIR/smb-probe-${SHARE_NAME}.json"
+probe_rc=$?
+```
+
+Exit-code handling per share:
+
+| `probe_rc` | Meaning | Behavior |
+|---|---|---|
+| `0` | host resolves AND port 445 reachable (or one of the probes was skipped because no resolver / no prober was on PATH — best-effort) | continue to Step 3 (CONFIRM) for this share |
+| `1` | DNS clearly failed (`resolves: "false"`) | write `.staging/smb-error.json` with `{"error": "unresolved_host", "share": "<name>", "input": "<unc>", "host": "<parsed-host>"}` and skip this share. If every share is unresolved, exit before MOUNT. |
+| `2` | port 445 closed / host unreachable | write `.staging/smb-error.json` with `{"error": "unreachable_host", "share": "<name>", "input": "<unc>", "host": "<parsed-host>"}` and skip this share. If every share is unreachable, exit before MOUNT. |
+| `64` | usage error (malformed input) | the structural validation in 2a should have caught this; treat as a config bug, fail the share with `scope_invalid`. |
+
+Probe results are kept in memory keyed by share name and surfaced in the
+Step 3 CONFIRM block so the operator can see the reachability state before
+authorising the mount. The probe is a pre-flight check, not a substitute
+for mount-time auth — a host that responds on port 445 may still reject
+the credential at mount time.
+
+`scripts/smb-probe-host.sh` is best-effort: if no DNS resolver is on PATH
+(`getent` / `dscacheutil` / `host` / `dig` / `nslookup` / `python3` all
+missing), the script returns `resolves: "skipped"` and exit 0. Same for the
+TCP probe (no `nc`, no `bash /dev/tcp` + `timeout`). The skill treats
+"skipped" as "couldn't determine — proceed to mount and let the OS report"
+rather than as a failure.
+
 ## Step 3: Confirm scope
 
 Print the resolved scope plus the exact mount command that will run for the
-current OS, and ask for y/N. This is the last chance to catch a typo in a
-UNC path before the skill touches the network.
+current OS, **plus the per-share probe result from Step 2b**, and ask for y/N.
+This is the last chance to catch a typo in a UNC path before the skill
+touches the network.
 
 ```
 About to scan SMB shares with the following scope:
@@ -161,9 +201,13 @@ About to scan SMB shares with the following scope:
   OS: macOS
   Shares (1):
     - name: ato-policies
-      UNC: //fileserver.corp/ato
+      UNC (input):     //fileserver.corp/ato
+      UNC (canonical): //fileserver.corp/ato
       Mount point: /Users/alice/mnt/ato-policies
       Credentials: kerberos
+      Probe:
+        Host resolves: true (via dscacheutil)
+        Port 445:      open (via nc)
       Mount command: mount_smbfs -o nobrowse,ro //fileserver.corp/ato /Users/alice/mnt/ato-policies
   Traversal depth: 3
   File types: .docx, .pdf, .md, .txt
@@ -171,6 +215,13 @@ About to scan SMB shares with the following scope:
 Mounts are read-only. Nothing will be written back to the share.
 Proceed? [y/N]
 ```
+
+When the probe reports `resolves: false` or `port_445: closed` for **all**
+configured shares, do not show this prompt — Step 2b already wrote the
+per-share `smb-error.json` and the run aborts before MOUNT. When the probe
+reports a failure for **some** shares, surface it loudly in the prompt and
+list the failing shares as "(skipped — see .staging/smb-error.json)" so the
+operator can choose whether to proceed with the remainder or abort.
 
 ## Step 4 (macOS branch)
 

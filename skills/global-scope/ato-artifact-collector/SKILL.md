@@ -1,6 +1,6 @@
 ---
 name: ato-artifact-collector
-description: "Collect, generate, and index NIST 800-53 security artifacts from a code repository for federal ATO (Authority to Operate) package preparation. Use whenever the user mentions ATO, NIST 800-53, security package, SSP artifacts, FedRAMP evidence collection, compliance artifacts, security documentation gathering, ATO readiness, compliance gaps, or security documentation completeness for a federal system. Even a casual 'collect security artifacts' or 'what do I need for my ATO' should trigger this skill. Accepts CLI-style flags (--repo / --aws / --azure / --sharepoint / --smb / --no-vuln-scan / --remediation / --poam) to bypass the interactive scope-confirmation interview; falls back to the interview when no source flags are present. Confirms scope, then delegates the multi-step collection to the ato-artifact-collector agent."
+description: "Collect, generate, and index NIST 800-53 security artifacts from a code repository for federal ATO (Authority to Operate) package preparation. Use whenever the user mentions ATO, NIST 800-53, security package, SSP artifacts, FedRAMP evidence collection, compliance artifacts, security documentation gathering, ATO readiness, compliance gaps, or security documentation completeness for a federal system. Even a casual 'collect security artifacts' or 'what do I need for my ATO' should trigger this skill. Accepts CLI-style flags (--repo / --no-repo / --aws / --azure / --sharepoint / --smb / --no-vuln-scan / --remediation / --poam) to bypass the interactive scope-confirmation interview; falls back to the interview when no source flags are present. Confirms scope, then delegates the multi-step collection to the ato-artifact-collector agent."
 ---
 
 # ATO Artifact Collector
@@ -13,7 +13,8 @@ Before doing anything else, parse the user's invocation arguments for the follow
 
 | Flag | Effect |
 |---|---|
-| `--repo` | Mark repo scope explicitly. (Repo is always implied; this flag is for documentation.) |
+| `--repo` | Mark repo scope explicitly. (Repo is the default source; this flag is for symmetry with the external-source flags and to make repo-only invocations self-documenting.) |
+| `--no-repo` | **Disable** the repo as a source: skip Step 1.5 (vuln scan needs the repo), skip Step 2 (Discover), skip Step 3 repo-file collection, and skip Step 5 (Deep Code Analysis). Steps 4, 6, 6.5–6.7, 7, and 8 still run, working purely from sibling-collected evidence. **Implies `--no-vuln-scan`** (the scanner has nothing to scan) — log `[INFO] --no-repo implies --no-vuln-scan; disabling vuln scan.` and proceed. **Requires at least one external source flag** (`--aws`, `--azure`, `--sharepoint`, `--smb`); a bare `--no-repo` with no external source is a usage error — print the available external flags and exit non-zero. |
 | `--aws` | Enable the AWS source. Skip the AWS y/N prompt. Requires ambient `aws` CLI auth and `ato-source-aws` installed. |
 | `--azure` | Enable the Azure source. Skip the Azure y/N prompt. Requires ambient `az` CLI auth and `ato-source-azure` installed. |
 | `--sharepoint` | Enable the SharePoint / M365 source. Skip the SharePoint y/N prompt. Requires ambient `m365` CLI auth and `ato-source-sharepoint` installed. |
@@ -27,9 +28,11 @@ Before doing anything else, parse the user's invocation arguments for the follow
 
 ### Precedence rule
 
-**Any source flag (`--aws`, `--azure`, `--sharepoint`, `--smb`) means: skip the interactive interview entirely and treat unflagged sources as disabled.** This matches CLI-tool conventions (explicit flags are authoritative; absence means off). If no source flags are present, fall through to the interview in Step 1.
+**Any source flag (`--repo`, `--no-repo`, `--aws`, `--azure`, `--sharepoint`, `--smb`) means: skip the interactive interview entirely and treat unflagged sources as disabled.** This matches CLI-tool conventions (explicit flags are authoritative; absence means off). If no source flags are present, fall through to the interview in Step 1.
 
-`--repo` on its own counts as a source flag — it triggers the same skip-interview behavior, with all four external sources disabled.
+`--repo` on its own counts as a source flag — it triggers the same skip-interview behavior, with all four external sources disabled. The repo source is enabled by default in flag mode unless `--no-repo` is passed; `--repo` is therefore optional when at least one external source flag is set, but it's still a useful self-documenting hint.
+
+`--no-repo` disables the repo source. It must combine with at least one of `--aws / --azure / --sharepoint / --smb`; on its own it's a usage error (no sources at all). It implies `--no-vuln-scan` and is incompatible with `--repo` (combining them is a usage error — print which one wins and exit).
 
 `--no-vuln-scan`, `--no-assessment`, `--no-synthesize`, `--accept-synthesized`, `--remediation`, and `--poam` are output-control flags (they don't affect source selection). They can combine with the interview path or the flag path freely. `--no-assessment` implies `--no-synthesize` (synthesis depends on Findings).
 
@@ -47,6 +50,10 @@ Before doing anything else, parse the user's invocation arguments for the follow
 | `--repo --no-synthesize` | Skip interview, repo only, assessment runs but no synthesized drafts written |
 | `--repo --accept-synthesized` | Skip interview, repo only, synthesis on, drafts auto-promoted to evidence (loud signaling) |
 | `--aws --azure --sharepoint --smb --remediation --poam` | Full external collection + auto-remediation + POAM (no interview) |
+| `--no-repo --sharepoint` | Skip interview, SharePoint only (no repo discovery, no deep code analysis, no vuln scan), no remediation, no POAM |
+| `--no-repo --smb --aws` | Skip interview, SMB + AWS only, no repo, no vuln scan, no remediation, no POAM |
+| `--no-repo` (alone) | **Usage error** — no sources to collect from. Print the external-source flags and exit non-zero. |
+| `--repo --no-repo` | **Usage error** — contradictory flags. Print the conflict and exit non-zero. |
 
 ## Step 1 — Confirm scope with the user (only when no source flags were passed)
 
@@ -87,7 +94,8 @@ Invoke the `Agent` tool with `subagent_type: "ato-artifact-collector"`. Pass:
 - The confirmed scope (from Step 0 flags or Step 1 interview).
 - The repo's working directory.
 - The output-control flags resolved in Step 0:
-  - `vuln_scan.enabled: true | false` (true unless `--no-vuln-scan` was passed or config disables it)
+  - `repo.enabled: true | false` (false if `--no-repo` was passed, otherwise true — repo is the default unless explicitly disabled)
+  - `vuln_scan.enabled: true | false` (false if `--no-vuln-scan` was passed, false if `--no-repo` was passed, false if config disables it; otherwise true)
   - `assessment.enabled: true | false` (config default unless `--no-assessment` was passed; default config is `true`)
   - `synthesis.enabled: true | false` (config default unless `--no-synthesize` was passed; default config is `true`; auto-disabled when `assessment.enabled: false`)
   - `synthesis.auto_accept: true | false` (true if `--accept-synthesized` was passed; default config is `false`)
