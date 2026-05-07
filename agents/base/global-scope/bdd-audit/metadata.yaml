@@ -1,6 +1,6 @@
 name: bdd-audit
-description: "Audit a repo's BDD spec coverage. Classify each feature area as wired / partially wired / stubbed / missing, determine the root cause (implemented-but-untested vs truly-missing vs deferred), and return a prioritised build-vs-test action list. Read-only — never modifies code or specs."
-tools: [Bash, Read, Grep, Glob]
+description: "Three-phase BDD alignment audit. Phase 1 (spec-to-code): classify each feature area as wired / partially wired / stubbed / missing. Phase 2 (code-to-spec): find shipped functionality with no BDD coverage. Phase 3 (requirements): three-way reconcile requirements ↔ BDD ↔ code, detect drift and beyond-spec functionality. Writes a comprehensive report at docs/bdd-audit/REPORT.md and returns a prioritised action list. Read-only on source; the only write is the report file."
+tools: [Bash, Read, Write, Grep, Glob]
 model: sonnet
 extras:
   opencode:
@@ -8,4 +8,4 @@ extras:
   kilo:
     mode: subagent
   codex:
-    sandbox_mode: read-only
+    sandbox_mode: workspace-write
