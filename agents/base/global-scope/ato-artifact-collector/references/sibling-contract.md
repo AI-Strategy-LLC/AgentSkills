@@ -264,6 +264,47 @@ The staging directory is transient. The orchestrator deletes
 `docs/ato-package/.staging/` at the end of Step 7 after successful merge.
 Siblings must not assume files in `.staging/` persist beyond a single run.
 
+## Document summarization protocol (optional)
+
+Source siblings that produce **document evidence** (PDFs, Word, Markdown,
+plain text — i.e. SMB and any future SharePoint / OneDrive / Box / S3-
+documents sibling) MAY use the shared `ato-doc-summarizer` agent to
+summarize candidate documents before deciding which to copy. This is
+the only sibling-to-sibling invocation allowed by this contract;
+summarization is a utility, not a peer source.
+
+The contract:
+
+1. **The sibling produces a manifest.** A source-specific extractor
+   (e.g. `scripts/smb-walk-extract.sh`) walks the source, extracts the
+   first ~3 pages of text from each candidate document into
+   `.staging/{source}-excerpts/<sha1>.txt`, and writes a
+   source-agnostic manifest at
+   `.staging/{source}-manifest.json` matching the schema in
+   `agents/base/global-scope/ato-doc-summarizer/references/manifest-contract.md`.
+2. **The sibling invokes the summarizer.** Via
+   `Skill: ato-doc-summarizer` with `manifest_path`,
+   `inventory_path`, and `inventory_md_path` arguments. The agent reads
+   each excerpt in its own context, applies the per-family rubric, and
+   writes a JSON inventory (`{source}-inventory.json`) plus a
+   glance-able Markdown summary (`{source}-inventory.md`).
+3. **The sibling consumes the inventory** in its own DISCOVER /
+   COPY / EMIT steps — copies high/medium-confidence files, records
+   low-confidence files in `partial_failures` with reason
+   `low_relevance_signal`, and threads `prescan_id` +
+   `prescan_confidence` into citation batch rows.
+4. **Document text never leaves the agent's context.** The sibling's
+   own context only sees the agent's neutral 2–3 sentence summaries.
+   The original documents are still copied byte-for-byte at COPY time
+   (the secret-scan in Step 6 runs against the original, not the
+   excerpt).
+
+The summarizer is invoked **inside the sibling's own flow** — the
+orchestrator does not invoke it directly. Cloud siblings (`ato-source-aws`,
+`ato-source-azure`) collect JSON, not documents, so they have no use for
+this protocol; they continue to write per-resource Markdown digests
+inline.
+
 ## Failure modes
 
 Siblings must handle these specific failure modes with specific exit behavior.

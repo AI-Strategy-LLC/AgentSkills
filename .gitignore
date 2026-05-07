@@ -14,3 +14,8 @@
 
 # Reference assessment spreadsheets (input data, not deliverable)
 *.xlsx
+
+# ATO package staging directory — transient scratch space the orchestrator
+# wipes at end-of-run (citation batches, doc-summarizer manifests + excerpts,
+# vulnscan tool output). Never part of the deliverable.
+docs/ato-package/.staging/
