@@ -1,5 +1,14 @@
 # SMB Discovery Patterns
 
+> **Role of this table after pre-scan landed.** The patterns below are now
+> a **first-pass filter** — they decide which extensions and which
+> directories the walker considers, and they provide a `filename_hint`
+> that the `ato-doc-summarizer` agent uses only as a tie-breaker. The
+> primary relevance signal is the agent's content-based summary of each
+> file's first ~3 pages. In legacy mode (`"prescan": false` in the
+> scope, or summarizer error) this table is the only signal — the same
+> behavior as before pre-scan landed.
+
 Same shape as the SharePoint pattern table — filename patterns mapped to
 the 20 control families. Matching is case-insensitive.
 

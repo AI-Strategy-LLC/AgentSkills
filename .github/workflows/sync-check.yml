@@ -1,0 +1,35 @@
+name: ato sync check
+
+on:
+  pull_request:
+    paths:
+      - "skills/global-scope/auth-config/**"
+      - "skills/global-scope/auth-interview/**"
+      - "agents/renderers/**"
+      - "ato/**"
+      - "bin/sync-ato.sh"
+      - ".github/workflows/sync-check.yml"
+  push:
+    branches: [main]
+
+jobs:
+  ato-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify ato/ is in sync with canonical sources
+        run: |
+          bash bin/sync-ato.sh --check
+
+      - name: Show what would be synced (on failure only)
+        if: failure()
+        run: |
+          echo "::group::sync-ato.sh --list"
+          bash bin/sync-ato.sh --list
+          echo "::endgroup::"
+          echo
+          echo "To fix locally:"
+          echo "  bash bin/sync-ato.sh"
+          echo "  git add ato/"
+          echo "  git commit --amend --no-edit"

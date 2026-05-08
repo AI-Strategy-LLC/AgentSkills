@@ -1,0 +1,11 @@
+name: ato-doc-summarizer
+description: "Summarize a batch of pre-extracted document excerpts against the NIST 800-53 control-family rubric. Reads a source-agnostic manifest of {path, excerpt_file, hint, source} entries and writes a ranked inventory with per-file summaries, suggested control families, suggested controls, and confidence tiers. Used by ato-source-smb (and future ato-source-sharepoint, etc.) to keep document text out of the orchestrator's main context. Read-only on the manifest and excerpts; writes only the two inventory files."
+tools: [Bash, Read, Write, Grep, Glob]
+model: sonnet
+extras:
+  opencode:
+    mode: subagent
+  kilo:
+    mode: subagent
+  codex:
+    sandbox_mode: workspace-write

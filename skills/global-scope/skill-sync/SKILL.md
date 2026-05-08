@@ -22,10 +22,6 @@ skills/
     merge-sprint/SKILL.md
     skill-sync/SKILL.md
     skill-interview/SKILL.md
-    auth-config/SKILL.md
-    auth-interview/SKILL.md
-    ato-artifact-collector/SKILL.md
-    ato-source-{aws,azure,sharepoint,smb}/SKILL.md
   repo-scope/        # per-repo — installed by skill-sync when the toolchain matches
     preflight/SKILL.md
     cargo-preflight/SKILL.md

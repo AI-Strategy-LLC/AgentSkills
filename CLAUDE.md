@@ -38,8 +38,13 @@ A paired stub and agent live in matching scopes — if the stub is global, the a
 | OpenAI Codex | `~/.codex/agents/` | `~/.agents/skills/` (shared) | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` | TOML `name =` |
 | Gemini CLI | `~/.gemini/agents/` | `~/.agents/skills/` (shared) | `<repo>/.gemini/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Pi (pi.dev) | — *(no subagents)* | `~/.agents/skills/` (shared) | `<repo>/.pi/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
+| Cursor | `~/.cursor/agents/` | `~/.agents/skills/` (shared) | `<repo>/.cursor/` | `<name>.mdc` (MDC + YAML) | filename |
 
 The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept a multi-CLI selection. The user chooses which CLIs to install for; each selected CLI gets its own correctly-shaped copy of every agent (where applicable — Pi has only skills).
+
+**Cursor caveat.** Cursor's "agents" concept is still evolving (Custom Agents, Background Agents, etc. — the API has shifted between minor versions). The renderer (`agents/renderers/cursor.sh`) emits MDC files with `description:` + `alwaysApply: false` frontmatter, which is the most stable cross-version representation. Bodies that say "invoke the Agent tool with `subagent_type:`" or "use the Skill tool" assume Claude Code semantics — those calls have no direct Cursor equivalent yet, and a thin-stub skill running in Cursor will degrade to "the model reads the steps and does them inline." Track Cursor's docs and update the renderer as the format stabilizes.
+
+**Native Windows support.** `install.ps1` (and `ato/install.ps1`) are PowerShell wrappers that detect Git Bash, offer to install Git for Windows via `winget` (or Chocolatey, or a manual download fallback), and forward args to the bash installers. Git Bash provides bash + curl + tar + the rest of the POSIX toolset the installer needs, and handles the Windows-path translation transparently. CLI directories follow the same `~/.<cli>/` convention — `~` resolves to `%USERPROFILE%` (e.g. `C:\Users\<name>\.claude\`).
 
 **Skill placement (strategy A — single canonical location, lean on cross-scan):** OpenCode, Kilo, Gemini, Codex, and Pi all auto-discover `~/.agents/skills/` as a cross-CLI compatibility location, so `install.sh` writes skills there once and lets those five CLIs pick them up. Claude is the only CLI that doesn't scan `~/.agents/`, so it gets its own `~/.claude/skills/`. Result: **at most two physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
 
@@ -124,10 +129,10 @@ A thin-stub skill often pairs with an agent. The stub triggers on user intent (p
 | `skills/global-scope/branch-review/` | `agents/base/global-scope/branch-review/` | global |
 | `skills/global-scope/bdd-audit/` | `agents/base/global-scope/bdd-audit/` | global |
 | `skills/global-scope/coverage-audit/` | `agents/base/global-scope/coverage-investigator/` (optional; skill is usable without agent) | global |
-| `skills/global-scope/ato-artifact-collector/` | `agents/base/global-scope/ato-artifact-collector/` | global |
-| `skills/global-scope/ato-vulnerability-scanner/` | `agents/base/global-scope/ato-vulnerability-scanner/` | global |
+| `ato/skills/global-scope/ato-artifact-collector/` | `ato/agents/base/global-scope/ato-artifact-collector/` | global (ATO subset) |
+| `ato/skills/global-scope/ato-vulnerability-scanner/` | `ato/agents/base/global-scope/ato-vulnerability-scanner/` | global (ATO subset) |
 
-`install.sh` installs every global-scope pair into each selected CLI's global directory, rendered per CLI. `skill-sync` handles repo-scope pairs (none today; reserved). Both share the `agents/base/` + `agents/renderers/` pattern.
+`install.sh` installs every global-scope pair under `skills/global-scope/` and `agents/base/global-scope/` into each selected CLI's global directory, rendered per CLI. The ATO collection lives under its own `ato/` subtree and ships with a dedicated installer (`ato/install.sh`) — see "ATO subset is independently shareable" below. `skill-sync` handles repo-scope pairs (none today; reserved). All three installers share the `agents/base/` + `agents/renderers/` pattern.
 
 ## Skills and agents must be generic
 
@@ -140,7 +145,7 @@ Every directory under `skills/` or `agents/` is a **generic** artifact — safe 
 - **Audit / review** — stub+agent pairs `bdd-audit/`, `branch-review/`, `deep-review/`, and skill `coverage-audit/` (optionally paired with `coverage-investigator` agent); `repo-health/`
 - **Batched-PR workflow** — `merge-sprint/`
 - **Per-repo provisioning** — `skill-sync/`, `skill-interview/`
-- **Credentials** — `auth-config/` (resolver — reads `~/.agent-skills/auth/auth.yaml`, runs user's vault CLI, validates session) and `auth-interview/` (AskUserQuestion-driven bootstrap of the config file, 0600 on write)
+- **Credentials** — `auth-config/` (resolver — reads `~/.agent-skills/auth/auth.yaml`, runs user's vault CLI, validates session) and `auth-interview/` (AskUserQuestion-driven bootstrap of the config file, 0600 on write). **Both currently live under `ato/skills/global-scope/`** since ATO is their only consumer; promote back to `skills/global-scope/` if a non-ATO consumer appears (see "Editing rules for the ATO subset" below).
 
 **Repo-scope** (`skills/repo-scope/`):
 
@@ -154,18 +159,51 @@ Every directory under `skills/` or `agents/` is a **generic** artifact — safe 
 
 `preflight` is the dispatcher — it invokes the matching `*-preflight` sibling via the Skill tool, with an inline fallback for unrecognized toolchains. When adding a new language-specific preflight, (1) wire it into `skills/repo-scope/preflight/SKILL.md`'s marker table, (2) add a matching row to `skills/global-scope/skill-sync/SKILL.md`'s detection table, and (3) keep the sibling's description prefixed `"Pre-PR checklist for <language>:"` so the harness disambiguates cleanly.
 
+## ATO subset is independently shareable
+
+The ATO (Authority to Operate) collection lives under a dedicated **`ato/`** subtree at the repo root:
+
+```
+ato/
+  skills/global-scope/         # 9 ATO skills + 2 shared auth skills
+  agents/base/global-scope/    # 3 ATO agents
+  agents/renderers/            # bundled per-CLI renderers (copies of agents/renderers/)
+  install.sh                   # ATO-only installer
+  README.md                    # the user guide
+```
+
+Why a separate folder? The ATO collection is the largest cohesive workflow in this repo and has its own audience (federal-system ISSOs and ATO authors) that may want it without the rest of the AgentSkills corpus. The `ato/` folder is **self-contained** — it carries every skill and agent the ATO flow needs (including the two auth skills `auth-config` and `auth-interview` that every source sibling preauths through, since ATO is their only consumer today) plus a copy of the per-CLI renderers. So it works whether you've cloned the parent repo or copied just the `ato/` folder somewhere else (an internal share, a separate repo, an archive). `bash ato/install.sh --for claude` writes a separate manifest (`~/.agent-skills/ato-installer-manifest.json`) so the two installers don't trip over each other.
+
+**Two installers, one source of truth:**
+
+- `bash install.sh --for <cli>` — installs **everything** (the generic AgentSkills corpus + the ATO collection). It walks `skills/global-scope/`, `agents/base/global-scope/`, AND `ato/skills/global-scope/`, `ato/agents/base/global-scope/`, deduping by name.
+- `bash ato/install.sh --for <cli>` — installs **only the ATO subset**. Runs from `ato/` and never reaches outside it, so the `ato/` folder remains independently shareable (drop it on a shared drive and ship it).
+
+**Editing rules for the ATO subset:**
+
+- **Everything under `ato/` except the renderer mirror is canonical there.** ATO-specific content (`ato-*`) and the auth skills (`auth-config`, `auth-interview` — they exclusively serve ATO today) all live under `ato/skills/global-scope/` and `ato/agents/base/global-scope/` with no canonical home elsewhere. Edit them in place; the main installer pulls them in via `merge_ato_into_src`.
+- **Renderers (`agents/renderers/*.sh`) are the only thing mirrored.** Canonical at `agents/renderers/`; copy lives at `ato/agents/renderers/`. Edit the canonical copy and run `bin/sync-ato.sh` before committing — the renderer needs to live in two places because the main installer renders ATO content during merge AND the standalone ATO bundle has to render its own agents without the parent repo present.
+
+**Sync mechanics:**
+
+- `bin/sync-ato.sh` — write changes (default), `--check` (CI/precommit, no writes, exit 1 on drift), `--list` (report state). Pairs are listed in the script's `PAIRS` array; add a row when you introduce a new shared file.
+- `.githooks/pre-commit` runs `bin/sync-ato.sh --check` and blocks the commit on drift. Activate per-clone: `bash bin/install-hooks.sh` (sets `core.hooksPath = .githooks`).
+- `.github/workflows/sync-check.yml` runs the same check on every PR, so contributors who skipped the local hook still get caught at PR time.
+
+**If `auth-config` / `auth-interview` ever pick up a non-ATO consumer**, promote them back to canonical: `git mv ato/skills/global-scope/auth-config skills/global-scope/auth-config` (and same for auth-interview), add a `skills/global-scope/auth-config:ato/skills/global-scope/auth-config` row to `bin/sync-ato.sh`'s `PAIRS` array, and run `bin/sync-ato.sh` to recreate the mirror.
+
 ## ATO orchestrator + sibling pattern
 
-The ATO orchestrator lives as an **agent** at `agents/base/global-scope/ato-artifact-collector/`, fronted by a thin stub skill at `skills/global-scope/ato-artifact-collector/`. The orchestrator coordinates six siblings, all under `skills/global-scope/` (one is paired with an agent — see "Sibling shapes" below):
+The ATO orchestrator lives as an **agent** at `ato/agents/base/global-scope/ato-artifact-collector/`, fronted by a thin stub skill at `ato/skills/global-scope/ato-artifact-collector/`. The orchestrator coordinates six siblings, all under `ato/skills/global-scope/` (one is paired with an agent — see "Sibling shapes" below):
 
 - **Source siblings** (4 read-only collectors): `ato-source-aws`, `ato-source-azure`, `ato-source-sharepoint`, `ato-source-smb`. Each runs when the user enables the corresponding external scope (AWS, Azure, SharePoint/M365, SMB shares).
 - **Vulnerability scanner** (`ato-vulnerability-scanner`): a 5th source, but shaped as **agent + thin stub** (the only sibling shaped that way). Runs in Step 1.5 (between Orient and Discover) by default; the user can disable per-run with `--no-vuln-scan` or per-host via `vulnerability_scan.enabled: false` in config.
 - **Remediation guidance** (`ato-remediation-guidance`): produces `REMEDIATION_GUIDANCE.md` post-collection. Runs only when the user explicitly asks, OR when the user invoked the orchestrator with `--remediation` / `--poam` (the stub flips an `auto_remediation` flag in the scope object).
 - **POA&M generator** (`ato-poam-generator`): produces `poam-generated.md/.csv` post-remediation. Runs only when the user explicitly asks, OR when the user invoked the orchestrator with `--poam` (which implies `--remediation`). Consumes the remediation output, vulnerability findings, and CHECKLIST gaps.
 
-The orchestrator's stub skill (`skills/global-scope/ato-artifact-collector/SKILL.md`) accepts CLI-style flags (`--repo / --aws / --azure / --sharepoint / --smb / --no-vuln-scan / --no-assessment / --no-synthesize / --accept-synthesized / --remediation / --poam`) that bypass the interactive scope-confirmation interview. Any source flag triggers skip-interview mode; unflagged sources are disabled. The flags compose: `--poam` implies `--remediation`; both can combine with any source set. `--no-assessment` disables Steps 6.5/6.6 (Findings/Result skipped, CSV becomes 7-column). `--no-synthesize` disables Step 6.6 only. `--accept-synthesized` auto-promotes synthesized drafts up one folder, flips Result to Satisfied, and emits loud signaling (end-of-run summary, INDEX.md banner, CHECKLIST notes column).
+The orchestrator's stub skill (`ato/skills/global-scope/ato-artifact-collector/SKILL.md`) accepts CLI-style flags (`--repo / --aws / --azure / --sharepoint / --smb / --no-vuln-scan / --no-assessment / --no-synthesize / --accept-synthesized / --remediation / --poam`) that bypass the interactive scope-confirmation interview. Any source flag triggers skip-interview mode; unflagged sources are disabled. The flags compose: `--poam` implies `--remediation`; both can combine with any source set. `--no-assessment` disables Steps 6.5/6.6 (Findings/Result skipped, CSV becomes 7-column). `--no-synthesize` disables Step 6.6 only. `--accept-synthesized` auto-promotes synthesized drafts up one folder, flips Result to Satisfied, and emits loud signaling (end-of-run summary, INDEX.md banner, CHECKLIST notes column).
 
-The full hand-off contract for the source siblings is documented in `agents/base/global-scope/ato-artifact-collector/references/sibling-contract.md` — read it before editing any source sibling. Invariants the source siblings all share:
+The full hand-off contract for the source siblings is documented in `ato/agents/base/global-scope/ato-artifact-collector/references/sibling-contract.md` — read it before editing any source sibling. Invariants the source siblings all share:
 
 - **Read-only.** No `create-*`, `put-*`, `delete-*`, `modify-*`, or any write verb. If asked to remediate, refuse and escalate.
 - **Ambient auth only.** Siblings never store credentials, never call `aws configure`, never touch `~/.aws/credentials` etc. They use whatever session the user already established via the native tool.
@@ -178,7 +216,7 @@ The same invariants apply to `ato-vulnerability-scanner` (read-only on the repo,
 
 Five of the six siblings are **skills**: `ato-source-{aws,azure,sharepoint,smb}` and `ato-remediation-guidance` and `ato-poam-generator`. They are invoked by the orchestrator agent via the Skill tool. `ato-vulnerability-scanner` is the exception — it is an **agent + thin stub skill** (same pattern as `branch-review`, `deep-review`, `bdd-audit`) because it runs many external tools, parses verbose JSON, and benefits from an isolated context. The orchestrator invokes it via `Skill: "ato-vulnerability-scanner"`; the skill stub delegates to the agent. Standalone invocation works the same way (the skill is user-facing).
 
-Source siblings write evidence into one of two top-level branches under `docs/ato-package/`: `ssp-sections/<NN>-<slug>/evidence/<source>_<file>` for document-shaped artifacts (the SSP body, IRP, CP, CMP, ConMon plan, ISA/MOU, POA&M, etc.) or `controls/<CF>-<slug>/evidence/<CONTROL-ID>/<source>_<file>` for per-control implementation evidence (an IAM role for AC-2, an NSG rule for SC-7, a CloudTrail config for AU-2, etc.). `<NN>` is the SSP-section ordinal (01–14), `<CF>` is the two-letter NIST 800-53 Rev 5 control-family code (all 20 always present: AC, AT, AU, CA, CM, CP, IA, IR, MA, MP, PE, PL, PM, PS, PT, RA, SA, SC, SI, SR), and `<CONTROL-ID>` is the specific control or enhancement (`AC-02`, `AC-02(04)`). Citation batches go to `docs/ato-package/.staging/{source}-citations.json` (where `{source}` ∈ `sharepoint | aws | azure | smb | vulnscan`; `vulnscan` is the sixth source token, peer to the cloud/share four). The canonical SSP-section + family table and the old-slug → new-path migration map live in `agents/base/global-scope/ato-artifact-collector/agent.md` under "File naming convention".
+Source siblings write evidence into one of two top-level branches under `docs/ato-package/`: `ssp-sections/<NN>-<slug>/evidence/<source>_<file>` for document-shaped artifacts (the SSP body, IRP, CP, CMP, ConMon plan, ISA/MOU, POA&M, etc.) or `controls/<CF>-<slug>/evidence/<CONTROL-ID>/<source>_<file>` for per-control implementation evidence (an IAM role for AC-2, an NSG rule for SC-7, a CloudTrail config for AU-2, etc.). `<NN>` is the SSP-section ordinal (01–14), `<CF>` is the two-letter NIST 800-53 Rev 5 control-family code (all 20 always present: AC, AT, AU, CA, CM, CP, IA, IR, MA, MP, PE, PL, PM, PS, PT, RA, SA, SC, SI, SR), and `<CONTROL-ID>` is the specific control or enhancement (`AC-02`, `AC-02(04)`). Citation batches go to `docs/ato-package/.staging/{source}-citations.json` (where `{source}` ∈ `sharepoint | aws | azure | smb | vulnscan`; `vulnscan` is the sixth source token, peer to the cloud/share four). The canonical SSP-section + family table and the old-slug → new-path migration map live in `ato/agents/base/global-scope/ato-artifact-collector/agent.md` under "File naming convention".
 
 **Sub-control granularity (Steps 4.5/4.6/6.5/6.6/6.7).** The orchestrator iterates at the **Determine If ID** level — sub-letters of the control body (`AC-02(a)`–`AC-02(l)`), enhancements (`AC-02(01)`), and enhancement-with-sub-letter chains (`AC-02(12)(b)`). Step 4.5 builds `.staging/sub-control-inventory.json` listing every Determine If ID per in-scope control. Step 4.6 emits per-Determine-If-ID manifests at `controls/<CF>-<slug>/evidence/<CONTROL-ID>/<DETERMINE-IF-ID>/<FAMILY>_<CONTROL-ID>_<DETERMINE-IF-ID>_relevant-evidence.md`; the family + control + Determine If ID embedded in the filename keeps every manifest uniquely identifiable when an assessor flattens the package or copies files into a GRC tool, and manifests reference parent-level evidence files by relative path (no file duplication within a family). Step 6.5 (assessment pass) generates a Findings paragraph + Result (Satisfied / NotSatisfied / blank) for every Determine If ID, comparing the implementation narrative against the requirement text. Step 6.6 (synthesis) generates draft artifacts at `synthesized/<FAMILY>_<CONTROL-ID>_<DETERMINE-IF-ID>_<artifact-slug>.md` for "implementation present, artifact missing" gaps (e.g., `AC_AC-02_AC-02(d)_role-matrix-draft.md`); when `--accept-synthesized` is set, drafts auto-promote up one folder with loud signaling. Step 6.7 emits a 9-column GRC CSV per family (`controls/<CF>-<slug>/<cf>-assessment.csv`) plus a master CSV (`controls/_master-assessment.csv`) with header `Family ID,Family,Control ID,Control,Determine If ID,Determine If Statement,Method,Result,Findings`. See `references/sub-control-enumeration.md`, `references/assessment-template.md`, `references/synthesis-patterns.md`, and `references/csv-schema.md` for the full schemas. Siblings remain control-level (do not write into per-Determine-If-ID sub-folders).
 
