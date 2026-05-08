@@ -1,73 +1,86 @@
 #!/usr/bin/env bash
-# install.sh — install AgentSkills' global-scope artifacts for one or more
-# AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI).
+# ato/install.sh — install ONLY the ATO (Authority to Operate) skill + agent
+# collection for one or more AI coding CLIs. This is a self-contained,
+# independently-shareable subset of the AgentSkills installer.
 #
-# Usage (one-liner — no clone required):
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude
+# What it installs:
+#   - 9 ATO skills    (ato-artifact-collector + 5 source skills + the
+#                      vulnerability-scanner stub + remediation-guidance + poam-generator)
+#   - 2 auth skills   (auth-config, auth-interview) — every ATO source sibling
+#                      preauths through them. They live canonically here under
+#                      ato/skills/global-scope/ since ATO is currently their
+#                      only consumer. The main installer also installs them
+#                      via merge_ato_into_src; if a future non-ATO consumer
+#                      appears, a one-line git mv promotes them back to the
+#                      generic skills/global-scope/ tree.
+#   - 3 ATO agents    (ato-artifact-collector, ato-vulnerability-scanner,
+#                      ato-doc-summarizer)
+# Nothing else. The general AgentSkills corpus (deep-review, branch-review,
+# coverage-audit, the language preflights, etc.) is NOT touched.
 #
-#   # Install for several CLIs at once:
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude,opencode,kilo
+# The ato/ folder is self-contained: it bundles the per-CLI renderers it
+# needs under ato/agents/renderers/, so this script works whether you've
+# cloned the parent AgentSkills repo or copied just the ato/ folder somewhere
+# else (an internal share, a separate repo, an archive).
 #
-#   # Pin a specific tag/branch/SHA:
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude --ref v1.0.0
+# Usage (from the repo root, when you've cloned AI-Strategy-LLC/AgentSkills):
+#   bash ato/install.sh --for claude
+#   bash ato/install.sh --for claude,opencode,codex
+#   bash ato/install.sh --for claude --list             # dry run
+#   bash ato/install.sh --uninstall                     # remove everything we installed
+#   bash ato/install.sh --uninstall --for claude        # remove for a single CLI
 #
-#   # Inspect before installing:
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude --list
-#
-#   # Remove what this script previously installed (everything, or per-CLI):
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --uninstall
-#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --uninstall --for claude
+# Usage (one-liner, once the branch is merged to main):
+#   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/ato/install.sh \
+#     | bash -s -- --for claude
 #
 # What it does:
-#   1. Fetches the repo at the chosen ref (tarball via curl, or `git clone` fallback).
-#   2. For each selected CLI, renders every agent under agents/base/global-scope/
-#      through agents/renderers/<cli>.sh and writes the result into that CLI's
-#      agents directory. Claude additionally gets skills/global-scope/*.
-#      Codex additionally gets an AGENTS.md inventory.
-#   3. Writes a single manifest tracking exactly what was installed per CLI.
-#   4. Re-runs are idempotent: new/updated artifacts replace, removed-from-source
-#      artifacts are pruned, user-authored artifacts are never touched.
+#   1. Locates the source tree (local checkout, --from <dir>, or fetched via
+#      tarball / git clone of the parent repo, looking for the ato/ subfolder).
+#   2. For each selected CLI, renders every ATO base agent through
+#      ato/agents/renderers/<cli>.sh and writes the result into the CLI's
+#      global agents directory. Skills land in the CLI's global skills
+#      directory. Codex additionally gets a small AGENTS.md inventory.
+#   3. Writes a per-CLI manifest at ~/.agent-skills/ato-installer-manifest.json
+#      so re-runs are idempotent and --uninstall removes only what we wrote.
 #
 # What it does NOT do:
-#   - Install repo-scope artifacts (those land per-repo via the skill-sync skill).
-#   - Modify shell configs or any user file outside the CLI agent/skill dirs —
-#     with one exception: if --for is exactly "kilo", the installer will write
-#     a defensive setting into Kilo's own config to disable scanning of other
-#     CLIs' agent directories. See the "Kilo defensive" section below.
+#   - Install the rest of AgentSkills. Use the top-level install.sh for that.
+#   - Modify shell configs.
 #   - Store credentials. For that, run the auth-interview skill after install.
 
 set -euo pipefail
 
-# Re-exec under bash if invoked via `sh install.sh`.
+# Re-exec under bash if invoked via `sh ato/install.sh`.
 if [ -z "${BASH_VERSION:-}" ]; then
     if command -v bash >/dev/null 2>&1; then
         exec bash "$0" "$@"
     fi
-    echo "install.sh: needs bash" >&2
+    echo "ato/install.sh: needs bash" >&2
     exit 1
 fi
 
 # ---- defaults -------------------------------------------------------------
 REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
-REF="${AGENT_SKILLS_REF:-release}"
+REF="${AGENT_SKILLS_REF:-main}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
-FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini
-FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path to source tree (skips fetch)
+FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,pi
+FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path containing ato/ (or being the ato/ folder)
 ACTION="install"
 ASSUME_YES=0
 KEEP_CACHE=""
 
-MANIFEST_NAME="installer-manifest.json"
+MANIFEST_NAME="ato-installer-manifest.json"
 
 SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
     cat <<EOF
-AgentSkills installer
+ATO Agent Collection installer
 
 Usage:
-  install.sh --for <cli>[,<cli>...] [options]
+  ato/install.sh --for <cli>[,<cli>...] [options]
 
 Required:
   --for <list>        Comma-separated list of CLIs. Any of:
@@ -77,27 +90,28 @@ Required:
                         codex      → ~/.codex/
                         gemini     → ~/.gemini/
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
-                        cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
+                        cursor     → ~/.cursor/     (rules-as-MDC)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
                       mode (e.g. pipe into sh -c) --for is required.
 
 Options:
-  --ref <ref>         Git ref to install (branch, tag, or SHA). Default: main
-  --repo <owner/name> Source GitHub repo. Default: AlastairThomson/AgentSkills
+  --ref <ref>         Git ref to install when fetching remotely. Default: main
+  --repo <owner/name> Source GitHub repo (must contain ato/). Default: AI-Strategy-LLC/AgentSkills
   --dest <dir>        Override install root. When set, each CLI installs under
-                      <dir>/<cli>/ (useful for sandboxed testing). When unset,
-                      each CLI uses its native root.
+                      <dir>/<cli>/.
   --list              Print what would be installed; do not write anything.
   --uninstall         Remove everything this script previously installed.
                       Combine with --for to restrict to specific CLIs.
-  --from <dir>        Install from a local checkout instead of fetching. Used
-                      for development and smoke tests.
+  --from <dir>        Install from a local checkout. <dir> may either be the
+                      AgentSkills repo root (we'll use <dir>/ato/) or the ato/
+                      folder itself (we detect skills/global-scope/ inside it).
   --keep-cache <dir>  After install, move the extracted source to <dir>.
   -y, --yes           Do not prompt; assume yes.
   -h, --help          This message.
 
-Environment variables:
-  AGENT_SKILLS_REPO, AGENT_SKILLS_REF, AGENT_SKILLS_DEST, AGENT_SKILLS_FOR
+Manifest:
+  ~/.agent-skills/${MANIFEST_NAME}    (per-user; separate from the main
+                                       AgentSkills installer manifest)
 EOF
 }
 
@@ -119,13 +133,12 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- helpers --------------------------------------------------------------
-die() { echo "install.sh: $*" >&2; exit 1; }
+die() { echo "ato/install.sh: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 iso_now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
 tty_read() {
-    # Read a line from /dev/tty. Fails if no TTY is available.
     local tty="/dev/tty"
     [ -r "$tty" ] && [ -w "$tty" ] || return 1
     local ans=""
@@ -148,10 +161,7 @@ confirm() {
 # ---- CLI target dirs ------------------------------------------------------
 cli_root() {
     local cli="$1"
-    if [ -n "$DEST" ]; then
-        printf '%s/%s' "$DEST" "$cli"
-        return
-    fi
+    if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$cli"; return; fi
     case "$cli" in
         claude)   printf '%s/.claude' "$HOME" ;;
         opencode) printf '%s/opencode' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
@@ -164,12 +174,7 @@ cli_root() {
     esac
 }
 
-# Some CLIs only consume skills — they have no subagent concept and so the
-# installer should skip the agent rendering loop for them entirely. Pi
-# (pi.dev) is the first such CLI: it's a "minimal terminal coding harness"
-# whose only customization mechanism is skills (loaded from ~/.pi/agent/skills/
-# and ~/.agents/skills/). It has no Agent tool, no subagent_type, no equivalent
-# to ~/.claude/agents/.
+# Pi has no subagents — only consumes skills.
 cli_has_agents() {
     case "$1" in
         pi) return 1 ;;
@@ -178,7 +183,6 @@ cli_has_agents() {
 }
 
 cli_agent_ext() {
-    # Most CLIs use .md; Codex uses .toml; Cursor uses .mdc.
     case "$1" in
         codex)  printf 'toml' ;;
         cursor) printf 'mdc' ;;
@@ -186,21 +190,10 @@ cli_agent_ext() {
     esac
 }
 
-# cli_skills_dir <cli>
-# Where to physically install global skills for a given CLI. Four CLIs
-# (opencode, kilo, gemini, codex) all auto-discover ~/.agents/skills/ as a
-# cross-CLI compatibility location, so we install once into ~/.agents/skills/
-# and let those CLIs pick it up. Claude is the only CLI that doesn't scan
-# ~/.agents/, so it gets its own dir. Result: at most TWO physical copies
-# on disk regardless of CLI selection — ~/.claude/skills/ and
-# ~/.agents/skills/.
-#
-# Codex was originally installed into ~/.codex/skills/ (its canonical path).
-# Empirically Codex also scans ~/.agents/skills/, so installing into both
-# surfaces every skill twice in Codex's UI. The migration in prune_removed
-# clears stale ~/.codex/skills/ content recorded under the old skills_root.
-#
-# Honours --dest by re-rooting under <DEST>/<bucket>.
+# Same dedup rule as the main installer: opencode/kilo/gemini/codex/pi all
+# auto-discover ~/.agents/skills/, so we install once into that shared
+# location. Claude is the only CLI that doesn't scan ~/.agents/, so it gets
+# its own ~/.claude/skills/.
 cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
@@ -208,16 +201,13 @@ cli_skills_dir() {
         opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
-    if [ -n "$DEST" ]; then
-        printf '%s/%s' "$DEST" "$bucket"
-    else
-        printf '%s/%s' "$HOME" "$bucket"
+    if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$bucket"
+    else                    printf '%s/%s' "$HOME" "$bucket"
     fi
 }
 
 # ---- validate --for -------------------------------------------------------
 normalize_for() {
-    # Strip spaces, expand commas, dedupe, validate each.
     local raw="$1" out="" c
     raw=$(printf '%s' "$raw" | tr -d '[:space:]')
     local IFS=,
@@ -233,12 +223,11 @@ normalize_for() {
 }
 
 prompt_for_clis() {
-    # Multi-select via /dev/tty. Returns space-separated CLIs.
     local tty="/dev/tty"
     [ -r "$tty" ] && [ -w "$tty" ] || return 1
     {
         echo
-        echo "Which CLIs should I install for?"
+        echo "Which CLIs should I install the ATO collection for?"
         echo "  1) claude    → ~/.claude/"
         echo "  2) opencode  → ~/.config/opencode/"
         echo "  3) kilo      → ~/.config/kilo/"
@@ -251,7 +240,6 @@ prompt_for_clis() {
     local ans; ans=$(tty_read) || return 1
     ans=$(printf '%s' "$ans" | tr -d '[:space:]')
     [ -z "$ans" ] && return 1
-    # Map digits → names
     local mapped="" t
     local IFS=,
     for t in $ans; do
@@ -271,11 +259,7 @@ prompt_for_clis() {
 }
 
 resolve_clis() {
-    if [ -n "$FOR_LIST" ]; then
-        normalize_for "$FOR_LIST"
-        return
-    fi
-    # No --for supplied: try the TTY prompt.
+    if [ -n "$FOR_LIST" ]; then normalize_for "$FOR_LIST"; return; fi
     local picked
     if picked=$(prompt_for_clis) && [ -n "$picked" ]; then
         normalize_for "$picked"
@@ -293,7 +277,7 @@ fi
 have tar || die "need tar"
 
 # ---- stage dir ------------------------------------------------------------
-STAGE="$(mktemp -d -t agent-skills.XXXXXX)"
+STAGE="$(mktemp -d -t ato-installer.XXXXXX)"
 cleanup() {
     if [ -n "$KEEP_CACHE" ] && [ -d "$STAGE/src" ]; then
         mkdir -p "$(dirname "$KEEP_CACHE")"
@@ -305,18 +289,46 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ATO_ROOT is the folder containing skills/global-scope/, agents/base/global-scope/,
+# and agents/renderers/. Set by fetch_source() once the layout is known.
+ATO_ROOT=""
+
 # ---- manifest location ----------------------------------------------------
-# Manifest travels with the install: under --dest when set, else in a
-# conventional home-rooted directory.
 manifest_path() {
-    if [ -n "$DEST" ]; then
-        printf '%s/%s' "$DEST" "$MANIFEST_NAME"
-    else
-        printf '%s/.agent-skills/%s' "$HOME" "$MANIFEST_NAME"
+    if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$MANIFEST_NAME"
+    else                    printf '%s/.agent-skills/%s' "$HOME" "$MANIFEST_NAME"
     fi
 }
 
 # ---- fetch ----------------------------------------------------------------
+# A directory is a valid "ATO root" if it has the three subtrees we need
+# AND the orchestrator skill+agent at the top-level skills/agents (rather
+# than under ato/). This second check distinguishes the dedicated ato/ folder
+# from the parent AgentSkills repo root, which also has the three subtrees
+# but with the ATO content nested under ato/.
+is_ato_root() {
+    local d="$1"
+    [ -d "$d/skills/global-scope/ato-artifact-collector" ] && \
+    [ -d "$d/agents/base/global-scope/ato-artifact-collector" ] && \
+    [ -d "$d/agents/renderers" ]
+}
+
+fetch_local() {
+    [ -d "$FROM_LOCAL" ] || die "--from: '$FROM_LOCAL' is not a directory"
+    mkdir -p "$STAGE/src"
+    if is_ato_root "$FROM_LOCAL"; then
+        # User pointed at the ato/ folder directly.
+        cp -R "$FROM_LOCAL/skills" "$FROM_LOCAL/agents" "$STAGE/src/"
+        ATO_ROOT="$STAGE/src"
+    elif is_ato_root "$FROM_LOCAL/ato"; then
+        # User pointed at a parent repo that contains ato/.
+        cp -R "$FROM_LOCAL/ato/skills" "$FROM_LOCAL/ato/agents" "$STAGE/src/"
+        ATO_ROOT="$STAGE/src"
+    else
+        die "--from: neither '$FROM_LOCAL' nor '$FROM_LOCAL/ato' looks like an ATO source root (need skills/global-scope, agents/base/global-scope, agents/renderers)"
+    fi
+}
+
 fetch_tarball() {
     local url="https://codeload.github.com/$REPO/tar.gz/$REF"
     local out="$STAGE/src.tar.gz"
@@ -324,87 +336,60 @@ fetch_tarball() {
         curl) curl -fsSL "$url" -o "$out" || die "failed to download $url" ;;
         wget) wget -q "$url" -O "$out" || die "failed to download $url" ;;
     esac
-    mkdir -p "$STAGE/src"
-    tar -xzf "$out" -C "$STAGE/src" --strip-components=1
+    mkdir -p "$STAGE/full"
+    tar -xzf "$out" -C "$STAGE/full" --strip-components=1
+    if is_ato_root "$STAGE/full/ato"; then
+        ATO_ROOT="$STAGE/full/ato"
+    elif is_ato_root "$STAGE/full"; then
+        ATO_ROOT="$STAGE/full"
+    else
+        die "fetched tarball at $REPO@$REF doesn't contain a recognizable ato/ folder"
+    fi
 }
 
 fetch_git() {
     have git || die "need git (or curl/wget) to fetch repo"
-    git clone --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$STAGE/src" 2>/dev/null \
-        || (git clone "https://github.com/$REPO.git" "$STAGE/src" && (cd "$STAGE/src" && git checkout "$REF"))
+    git clone --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$STAGE/full" 2>/dev/null \
+        || (git clone "https://github.com/$REPO.git" "$STAGE/full" && (cd "$STAGE/full" && git checkout "$REF"))
+    if is_ato_root "$STAGE/full/ato"; then
+        ATO_ROOT="$STAGE/full/ato"
+    elif is_ato_root "$STAGE/full"; then
+        ATO_ROOT="$STAGE/full"
+    else
+        die "cloned $REPO@$REF doesn't contain a recognizable ato/ folder"
+    fi
 }
 
-fetch_local() {
-    [ -d "$FROM_LOCAL" ] || die "--from: '$FROM_LOCAL' is not a directory"
-    [ -d "$FROM_LOCAL/skills/global-scope" ] || die "--from: '$FROM_LOCAL' missing skills/global-scope"
-    [ -d "$FROM_LOCAL/agents/base/global-scope" ] || die "--from: '$FROM_LOCAL' missing agents/base/global-scope"
-    mkdir -p "$STAGE/src"
-    cp -R "$FROM_LOCAL/skills" "$FROM_LOCAL/agents" "$STAGE/src/"
-    # Copy the ato/ subtree too if the parent has one (so merge_ato_into_src
-    # below can fold its content into the unified install set).
-    if [ -d "$FROM_LOCAL/ato" ]; then
-        cp -R "$FROM_LOCAL/ato" "$STAGE/src/"
+# Implicit-local: when invoked from inside a clone (the script's own
+# directory satisfies is_ato_root), use that. Saves a round-trip.
+fetch_implicit_local() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+    [ -n "$script_dir" ] || return 1
+    if is_ato_root "$script_dir"; then
+        ATO_ROOT="$script_dir"
+        return 0
     fi
+    return 1
 }
 
 fetch_source() {
     if [ -n "$FROM_LOCAL" ]; then
         fetch_local
-    else
-        fetch_tarball || { echo "tarball fetch failed, falling back to git clone"; fetch_git; }
+        return
     fi
-    merge_ato_into_src
-}
-
-# After fetch_source pulls the repo into $STAGE/src, fold ato/skills/global-scope/*
-# and ato/agents/base/global-scope/* into the unified install set so the rest
-# of this installer naturally walks both subtrees. Names already present in
-# the canonical tree win — but today only the renderers have a canonical
-# home outside ato/, and renderers aren't installed as skills/agents anyway.
-# Everything else (ATO skills, ATO agents, auth-config, auth-interview)
-# lives only under ato/, so the dedup is just defensive against future
-# accidental duplication.
-#
-# Net effect: `bash install.sh --for <cli>` installs everything (generic +
-# ATO). `bash ato/install.sh --for <cli>` installs only the ATO subset.
-merge_ato_into_src() {
-    local src="$STAGE/src"
-    [ -d "$src/ato" ] || return 0
-
-    if [ -d "$src/ato/skills/global-scope" ]; then
-        mkdir -p "$src/skills/global-scope"
-        for d in "$src/ato/skills/global-scope"/*/; do
-            [ -d "$d" ] || continue
-            local n; n=$(basename "$d")
-            [ -e "$src/skills/global-scope/$n" ] && continue
-            cp -R "$d" "$src/skills/global-scope/$n"
-        done
+    if fetch_implicit_local; then
+        return
     fi
-
-    if [ -d "$src/ato/agents/base/global-scope" ]; then
-        mkdir -p "$src/agents/base/global-scope"
-        for d in "$src/ato/agents/base/global-scope"/*/; do
-            [ -d "$d" ] || continue
-            local n; n=$(basename "$d")
-            [ -e "$src/agents/base/global-scope/$n" ] && continue
-            cp -R "$d" "$src/agents/base/global-scope/$n"
-        done
-    fi
+    fetch_tarball || { echo "tarball fetch failed, falling back to git clone"; fetch_git; }
 }
 
 # ---- agent shape helpers --------------------------------------------------
-# A base agent is "directory form" if it bundles references/, evals/, or config.yaml.
 agent_is_dir_form() {
     local d="$1"
     [ -d "$d/references" ] || [ -d "$d/evals" ] || [ -f "$d/config.yaml" ]
 }
 
-# Some CLIs recursively scan their agents/ directory and register every .md
-# file (including bundled references/*.md) as a separate, broken, namespaced
-# agent. To avoid that, we install agents flat for those CLIs regardless of
-# whether the base bundles references — the renderer inlines the references
-# into the agent body instead. Codex (.toml) and Claude don't have this
-# problem.
 cli_uses_flat_only() {
     case "$1" in
         opencode|kilo|gemini|cursor) return 0 ;;
@@ -412,9 +397,6 @@ cli_uses_flat_only() {
     esac
 }
 
-# Copy every sibling file/dir (references, evals, config.yaml) alongside the
-# rendered agent. Does NOT copy metadata.yaml or agent.md — those live only
-# in the base tree.
 copy_agent_bundled() {
     local base="$1" target_dir="$2"
     [ -d "$base/references" ] && cp -R "$base/references" "$target_dir/"
@@ -425,13 +407,14 @@ copy_agent_bundled() {
 
 # ---- list / install -------------------------------------------------------
 list_install_set() {
-    local src_skills="$STAGE/src/skills/global-scope"
-    local src_agents="$STAGE/src/agents/base/global-scope"
+    local src_skills="$ATO_ROOT/skills/global-scope"
+    local src_agents="$ATO_ROOT/agents/base/global-scope"
 
-    [ -d "$src_skills" ] || die "source tarball has no skills/global-scope/ — wrong repo or ref?"
-    [ -d "$src_agents" ] || die "source tarball has no agents/base/global-scope/ — wrong repo or ref?"
+    [ -d "$src_skills" ] || die "ATO_ROOT '$ATO_ROOT' has no skills/global-scope/"
+    [ -d "$src_agents" ] || die "ATO_ROOT '$ATO_ROOT' has no agents/base/global-scope/"
 
     echo "Selected CLIs: $CLIS"
+    echo "ATO source root: $ATO_ROOT"
     for cli in $CLIS; do
         local root; root=$(cli_root "$cli")
         local sdir; sdir=$(cli_skills_dir "$cli")
@@ -457,28 +440,20 @@ list_install_set() {
             fi
         done
         if [ "$cli" = codex ]; then
-            echo "  AGENTS.md   (installed-agent inventory)"
+            echo "  AGENTS.md   (ATO-only inventory at $root/ATO_AGENTS.md)"
         fi
     done
-
-    # Note: opencode/kilo/gemini share ~/.agents/skills/ — listed per CLI
-    # above for clarity, but install.sh writes that directory only once.
 }
 
 # ---- install one CLI ------------------------------------------------------
 install_cli() {
     local cli="$1"
 
-    # CLIs without subagents (e.g. pi) only need their skills directory
-    # populated, which is handled by install_skills_dedup() in the main loop.
-    # Nothing to render or write under <cli-root>/agents/.
-    if ! cli_has_agents "$cli"; then
-        return 0
-    fi
+    if ! cli_has_agents "$cli"; then return 0; fi
 
-    local src_agents="$STAGE/src/agents/base/global-scope"
-    local renderer="$STAGE/src/agents/renderers/$cli.sh"
-    local codex_agents_md="$STAGE/src/agents/renderers/codex-agents-md.sh"
+    local src_agents="$ATO_ROOT/agents/base/global-scope"
+    local renderer="$ATO_ROOT/agents/renderers/$cli.sh"
+    local codex_agents_md="$ATO_ROOT/agents/renderers/codex-agents-md.sh"
     local root; root=$(cli_root "$cli")
     local ext; ext=$(cli_agent_ext "$cli")
 
@@ -486,13 +461,6 @@ install_cli() {
 
     mkdir -p "$root/agents"
 
-    # Note: skills are installed by install_skills_dedup() in the main loop,
-    # not here. Each CLI's skills directory is computed by cli_skills_dir,
-    # and opencode/kilo/gemini share ~/.agents/skills/ — installing per-CLI
-    # would write that directory three times. The dedup helper writes each
-    # unique skills directory exactly once.
-
-    # agents: render every base agent through this CLI's renderer.
     local bases=()
     for d in "$src_agents"/*/; do
         [ -d "$d" ] || continue
@@ -500,7 +468,6 @@ install_cli() {
         bases+=("$d")
 
         if agent_is_dir_form "$d" && ! cli_uses_flat_only "$cli"; then
-            # Directory form: write the rendered file inside <cli-root>/agents/<name>/<name>.<ext>
             local target_dir="$root/agents/$name"
             rm -rf "$target_dir"
             rm -f "$root/agents/$name.$ext"
@@ -508,27 +475,21 @@ install_cli() {
             "$renderer" "$d" > "$target_dir/$name.$ext"
             copy_agent_bundled "$d" "$target_dir"
         else
-            # Flat form: single file at <cli-root>/agents/<name>.<ext>.
-            # The rm -rf cleans up any residual directory-form layout from a
-            # previous install (important after switching opencode/kilo/gemini
-            # away from directory form).
             rm -rf "$root/agents/$name"
             "$renderer" "$d" > "$root/agents/$name.$ext"
         fi
     done
 
-    # Codex extra: AGENTS.md at the cli root (not under agents/).
+    # Codex extra: ATO_AGENTS.md (a separate inventory, so we don't clobber
+    # the main installer's AGENTS.md when both installers are used).
     if [ "$cli" = codex ]; then
-        "$codex_agents_md" "${bases[@]}" > "$root/AGENTS.md"
+        "$codex_agents_md" "${bases[@]}" > "$root/ATO_AGENTS.md"
     fi
 }
 
 # ---- install skills (deduped across CLIs) ---------------------------------
-# Walk $CLIS, build the set of unique skills directories (opencode/kilo/gemini
-# all map to ~/.agents/skills/), and write each one exactly once. Echoes the
-# unique directories to stdout, one per line, so the caller can log them.
 install_skills_dedup() {
-    local src_skills="$STAGE/src/skills/global-scope"
+    local src_skills="$ATO_ROOT/skills/global-scope"
     [ -d "$src_skills" ] || return 0
 
     local seen=" "
@@ -548,66 +509,28 @@ install_skills_dedup() {
     done
 }
 
-# ---- Kilo defensive -------------------------------------------------------
-# Only when --for is *exactly* ["kilo"] do we touch Kilo's settings to prevent
-# it picking up .claude/.opencode/.agents directories owned by other tools.
-# The exact Kilo settings key / file path is a moving target; we check the
-# known locations, and if none exist we just print a notice instead of
-# inventing a file.
-kilo_defensive_setup() {
-    [ "$CLIS" = "kilo" ] || return 0
-
-    local kilo_root; kilo_root=$(cli_root kilo)
-    local kilo_cfg="$kilo_root/settings.json"
-    local kilo_cfg_alt="$kilo_root/kilo.jsonc"
-
-    echo
-    if [ -f "$kilo_cfg" ] || [ -f "$kilo_cfg_alt" ]; then
-        echo "Kilo cross-scan note:"
-        echo "  You installed for Kilo only. Kilo by default scans .claude/ and"
-        echo "  .opencode/ directories for agents. To isolate Kilo, add this to"
-        echo "  your Kilo settings file (key name may vary by Kilo version):"
-        echo
-        echo "    { \"agent_scan_paths\": [\"\$HOME/.config/kilo/agents\"] }"
-        echo
-        echo "  Settings file: ${kilo_cfg:-$kilo_cfg_alt}"
-    else
-        echo "Kilo cross-scan note:"
-        echo "  You installed for Kilo only, but no Kilo settings file was found at"
-        echo "  $kilo_cfg or $kilo_cfg_alt. If Kilo picks up stale agents from"
-        echo "  .claude/ or .opencode/, create a settings file with a restricted"
-        echo "  agent_scan_paths list (key name varies by Kilo version — check"
-        echo "  'kilo --help settings' or the current Kilo docs)."
-    fi
-}
-
 # ---- manifest I/O ---------------------------------------------------------
 write_manifest() {
     local resolved_sha="$1"
-    local src_skills="$STAGE/src/skills/global-scope"
-    local src_agents="$STAGE/src/agents/base/global-scope"
+    local src_skills="$ATO_ROOT/skills/global-scope"
+    local src_agents="$ATO_ROOT/agents/base/global-scope"
     local mpath; mpath=$(manifest_path)
     mkdir -p "$(dirname "$mpath")"
 
-    # Build per-CLI JSON blocks.
     local blocks=""
-    local cli_idx=0
-    local cli_count=0
+    local cli_idx=0 cli_count=0
     for cli in $CLIS; do cli_count=$((cli_count+1)); done
 
     for cli in $CLIS; do
         cli_idx=$((cli_idx+1))
         local skills_json="" flat_json="" dir_json=""
 
-        # Skills are now installed for every CLI (same set, possibly into
-        # a shared physical path — see cli_skills_dir).
         for d in "$src_skills"/*/; do
             [ -d "$d" ] || continue
             local n; n=$(basename "$d")
             skills_json="${skills_json}      \"$(json_escape "$n")\",\n"
         done
 
-        # Skills-only CLIs (e.g. pi) have no agents — leave both arrays empty.
         if cli_has_agents "$cli"; then
             for d in "$src_agents"/*/; do
                 [ -d "$d" ] || continue
@@ -638,14 +561,15 @@ write_manifest() {
 
     {
         printf '{\n'
-        printf '  "version": 3,\n'
+        printf '  "version": 1,\n'
+        printf '  "kind": "ato-only",\n'
         printf '  "source": {\n'
         printf '    "repo": "%s",\n' "$(json_escape "$REPO")"
         printf '    "ref": "%s",\n' "$(json_escape "$REF")"
         printf '    "resolved_sha": "%s"\n' "$(json_escape "$resolved_sha")"
         printf '  },\n'
         printf '  "installed_at": "%s",\n' "$(iso_now)"
-        printf '  "installer_version": 3,\n'
+        printf '  "installer_version": 1,\n'
         printf '  "clis": ['
         local first=1
         for cli in $CLIS; do
@@ -661,8 +585,6 @@ write_manifest() {
     chmod 0644 "$mpath"
 }
 
-# Extract a list (skills | agents_flat | agents_dir) for a given cli from the
-# existing manifest. Tolerant to formatting changes.
 manifest_list() {
     local mpath="$1" cli="$2" key="$3"
     awk -v cli="$cli" -v key="$key" '
@@ -674,8 +596,6 @@ manifest_list() {
     ' "$mpath"
 }
 
-# Extract a scalar value (e.g. "skills_root") for a given cli from the
-# existing manifest. Empty string if absent (manifest pre-v3 won't have it).
 manifest_scalar() {
     local mpath="$1" cli="$2" key="$3"
     awk -v cli="$cli" -v key="$key" '
@@ -691,21 +611,11 @@ manifest_scalar() {
 }
 
 prune_removed() {
-    # For each CLI we just installed, compare the old manifest's per-CLI list
-    # to what we just installed. Remove anything that was in the old list but
-    # is no longer in the source tree.
-    #
-    # Skills can share a physical directory across CLIs (~/.agents/skills/),
-    # so we dedup the prune set by path — pruning the same skill twice is
-    # idempotent but pruning a skill another CLI still uses would be a bug.
-    # Since prune only removes skills that are gone from source entirely,
-    # all CLIs lose them at once, so per-path dedup is just an efficiency
-    # win, not a correctness one.
     local mpath; mpath=$(manifest_path)
     [ -f "$mpath.old" ] || return 0
 
-    local src_skills="$STAGE/src/skills/global-scope"
-    local src_agents="$STAGE/src/agents/base/global-scope"
+    local src_skills="$ATO_ROOT/skills/global-scope"
+    local src_agents="$ATO_ROOT/agents/base/global-scope"
 
     local skill_paths_seen=" "
     for cli in $CLIS; do
@@ -714,18 +624,9 @@ prune_removed() {
         local ext; ext=$(cli_agent_ext "$cli")
         local old_sdir; old_sdir=$(manifest_scalar "$mpath.old" "$cli" skills_root)
 
-        # If the old manifest recorded a different skills_root for this CLI,
-        # the previous install put skills somewhere we no longer use. Remove
-        # every skill the old manifest recorded for this CLI from that old
-        # path — the user still has them in the new location, so this is
-        # purely a cleanup. (Empty old_sdir means a pre-v3 manifest with no
-        # skills_root recorded; nothing to migrate.)
         if [ -n "$old_sdir" ] && [ "$old_sdir" != "$sdir" ]; then
             local old_skills_at_old_path; old_skills_at_old_path=$(manifest_list "$mpath.old" "$cli" skills)
-            for n in $old_skills_at_old_path; do
-                rm -rf "$old_sdir/$n"
-            done
-            # Remove the directory itself if it's now empty.
+            for n in $old_skills_at_old_path; do rm -rf "$old_sdir/$n"; done
             rmdir "$old_sdir" 2>/dev/null || true
         fi
 
@@ -755,21 +656,17 @@ prune_removed() {
 # ---- uninstall ------------------------------------------------------------
 uninstall() {
     local mpath; mpath=$(manifest_path)
-    [ -f "$mpath" ] || { echo "No manifest at $mpath — nothing to uninstall."; return 0; }
+    [ -f "$mpath" ] || { echo "No ATO manifest at $mpath — nothing to uninstall."; return 0; }
 
-    # If --for not supplied, uninstall everything recorded in the manifest.
     local target_clis="$CLIS"
     if [ -z "$FOR_LIST" ]; then
         target_clis=$(awk '/"clis":/ { sub(".*\\[",""); sub("\\].*",""); gsub(/[",]/," "); print; exit }' "$mpath")
     fi
 
-    echo "This will remove artifacts for: $target_clis"
+    echo "This will remove the ATO collection's artifacts for: $target_clis"
     echo "  manifest: $mpath"
     confirm "Proceed?" || { echo "aborted"; exit 1; }
 
-    # Compute which CLIs from the manifest will remain after this uninstall.
-    # A shared skills_dir (e.g. ~/.agents/skills/) is only safe to remove if
-    # NO remaining CLI still maps to it.
     local all_clis_in_manifest
     all_clis_in_manifest=$(awk '/"clis":/ { sub(".*\\[",""); sub("\\].*",""); gsub(/[",]/," "); print; exit }' "$mpath")
     local remaining_clis=""
@@ -786,7 +683,6 @@ uninstall() {
         local sdir; sdir=$(cli_skills_dir "$cli")
         local ext; ext=$(cli_agent_ext "$cli")
 
-        # Skills: only remove if no remaining CLI shares this physical path.
         case "$skill_paths_processed" in
             *" $sdir "*) ;;
             *)
@@ -803,19 +699,13 @@ uninstall() {
 
         for n in $(manifest_list "$mpath" "$cli" agents_flat); do rm -f "$root/agents/$n.$ext"; done
         for n in $(manifest_list "$mpath" "$cli" agents_dir);  do rm -rf "$root/agents/$n"; done
-        [ "$cli" = codex ] && rm -f "$root/AGENTS.md"
+        [ "$cli" = codex ] && rm -f "$root/ATO_AGENTS.md"
     done
 
-    # If uninstalling everything, delete the manifest. Otherwise rewrite it
-    # with the remaining CLIs.
     if [ -z "$FOR_LIST" ]; then
         rm -f "$mpath"
     else
-        # Simplest path: regenerate manifest by dropping --for CLIs from "clis"
-        # and deleting their blocks. For now, prompt the user to re-run
-        # install without --for to cleanly regenerate; the manifest is left
-        # stale with the removed CLI's lists pointing at now-deleted files.
-        echo "Note: manifest still lists uninstalled CLIs. Re-run install to regenerate."
+        echo "Note: ATO manifest still lists uninstalled CLIs. Re-run install to regenerate."
     fi
     echo "Removed."
 }
@@ -823,11 +713,8 @@ uninstall() {
 # ---- main -----------------------------------------------------------------
 case "$ACTION" in
     uninstall)
-        # For uninstall, resolve CLIs only if --for was passed.
-        if [ -n "$FOR_LIST" ]; then
-            CLIS=$(normalize_for "$FOR_LIST")
-        else
-            CLIS=""
+        if [ -n "$FOR_LIST" ]; then CLIS=$(normalize_for "$FOR_LIST")
+        else CLIS=""
         fi
         uninstall
         ;;
@@ -837,7 +724,7 @@ case "$ACTION" in
         if [ -n "$FROM_LOCAL" ]; then
             echo "Reading local source at $FROM_LOCAL …"
         else
-            echo "Fetching $REPO@$REF for listing …"
+            echo "Resolving ATO source …"
         fi
         fetch_source
         list_install_set
@@ -845,7 +732,7 @@ case "$ACTION" in
 
     install)
         CLIS=$(resolve_clis)
-        echo "AgentSkills installer"
+        echo "ATO Agent Collection installer"
         echo "  source : $REPO @ $REF"
         echo "  CLIs   : $CLIS"
         if [ -n "$DEST" ]; then
@@ -862,11 +749,11 @@ case "$ACTION" in
         if [ -n "$FROM_LOCAL" ]; then
             echo "Reading local source at $FROM_LOCAL …"
         else
-            echo "Fetching …"
+            echo "Resolving ATO source …"
         fi
         fetch_source
+        echo "  ato root: $ATO_ROOT"
 
-        # Back up existing manifest so prune_removed can diff against it.
         if [ -f "$MPATH" ]; then cp "$MPATH" "$MPATH.old"; fi
 
         echo "Installing …"
@@ -879,33 +766,30 @@ case "$ACTION" in
             install_cli "$cli"
         done
 
-        # Skills install once per unique physical path (opencode/kilo/gemini
-        # all share ~/.agents/skills/).
         echo "Installing skills …"
         install_skills_dedup | while read -r installed_path; do
             echo "  • skills → $installed_path"
         done
 
-        # Resolve SHA if we cloned with git, else leave as the ref.
         RESOLVED_SHA="$REF"
-        if [ -d "$STAGE/src/.git" ]; then
-            RESOLVED_SHA=$(git -C "$STAGE/src" rev-parse HEAD 2>/dev/null || echo "$REF")
+        if [ -d "$STAGE/full/.git" ]; then
+            RESOLVED_SHA=$(git -C "$STAGE/full" rev-parse HEAD 2>/dev/null || echo "$REF")
         fi
 
         write_manifest "$RESOLVED_SHA"
         prune_removed
         rm -f "$MPATH.old"
 
-        kilo_defensive_setup
-
         echo
-        echo "✓ Installed AgentSkills ($REPO@$REF) for: $CLIS"
+        echo "✓ Installed ATO Agent Collection ($REPO@$REF) for: $CLIS"
         echo "  Manifest: $MPATH"
         echo
         echo "Next steps:"
-        echo "  • In any repo, ask your AI CLI to run \`skill-sync\` to install repo-scope artifacts."
-        echo "  • If you'll use ATO source skills or multi-model agents that need API keys,"
-        echo "    run \`auth-interview\` once to bootstrap ~/.agent-skills/auth/auth.yaml."
+        echo "  • Run /ato-artifact-collector inside any repo to start an ATO collection."
+        echo "  • For external sources (AWS / Azure / SharePoint / OneDrive / SMB),"
+        echo "    log in to the matching CLI first (see ato/README.md → Authentication),"
+        echo "    or run \`auth-interview\` once for a guided vault-backed setup"
+        echo "    (1Password / Bitwarden / Keychain / Vault / env vars / user scripts)."
         ;;
 
     *) die "unknown action: $ACTION" ;;

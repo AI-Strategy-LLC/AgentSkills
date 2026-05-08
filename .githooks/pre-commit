@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — verify the ato/ subset is in sync with canonical sources.
+#
+# Activated when contributors run `bin/install-hooks.sh` (which sets
+# core.hooksPath = .githooks). CI also runs the same check, so contributors
+# who haven't run install-hooks.sh still get caught — but they pay for it
+# at PR time rather than at commit time.
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+sync_script="$repo_root/bin/sync-ato.sh"
+
+if [ ! -x "$sync_script" ]; then
+    # Sync script missing or non-executable — don't block the commit, but
+    # warn so contributors can investigate.
+    echo "pre-commit: $sync_script not executable; skipping sync check." >&2
+    exit 0
+fi
+
+if ! "$sync_script" --check; then
+    echo >&2
+    echo "Commit blocked: ato/ is out of sync with canonical sources." >&2
+    echo "Run \`bin/sync-ato.sh\` to update the mirrors, then \`git add\` and re-commit." >&2
+    exit 1
+fi
