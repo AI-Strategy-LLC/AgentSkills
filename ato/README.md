@@ -125,16 +125,18 @@ Empty SSP sections and control families are still created — each carries a `*-
 
 | Component | Type | What it does | Where to find it |
 |---|---|---|---|
-| `ato-artifact-collector` | Stub skill + agent | Orchestrator. The thing you invoke. 8-step workflow + Step 1.5 vuln scan + post-Step-8 follow-ons. | `skills/global-scope/ato-artifact-collector/` and `agents/base/global-scope/ato-artifact-collector/` |
-| `ato-source-aws` | Skill | Read-only AWS evidence collector via `aws` CLI. US regions only. | `skills/global-scope/ato-source-aws/` |
-| `ato-source-azure` | Skill | Read-only Azure evidence collector via `az` CLI. US regions only. | `skills/global-scope/ato-source-azure/` |
-| `ato-source-sharepoint` | Skill | Read-only SharePoint Online / M365 team-site collector via `m365` CLI. Includes a content-based pre-scan (pulls first ~3 pages of each candidate doc and ranks per family via `ato-doc-summarizer`). | `skills/global-scope/ato-source-sharepoint/` |
-| `ato-source-onedrive` | Skill | Read-only OneDrive for Business collector (per-user personal SharePoint sites) via `m365` CLI. Same pre-scan + summarization layer as SharePoint. Independent scope from `--sharepoint`. | `skills/global-scope/ato-source-onedrive/` |
-| `ato-source-smb` | Skill | Read-only SMB / Windows-share collector. macOS / Linux / Windows. Includes a pre-mount existence probe (DNS + TCP/445) and a content-based document pre-scan via `ato-doc-summarizer`. | `skills/global-scope/ato-source-smb/` |
-| `ato-doc-summarizer` | Sub-agent | Source-agnostic document summarizer invoked by SMB / SharePoint / OneDrive pre-scan. Reads extracted excerpts, returns a 2–3 sentence neutral summary + per-control-family confidence scores. Document text stays inside its isolated context. | `agents/base/global-scope/ato-doc-summarizer/` |
-| `ato-vulnerability-scanner` | Stub skill + agent | Pre-collection vulnerability baseline (Step 1.5). Default-on. Standalone-invocable. | `skills/global-scope/ato-vulnerability-scanner/` and `agents/base/global-scope/ato-vulnerability-scanner/` |
-| `ato-remediation-guidance` | Skill | Developer punch list — turns gaps into RG-NNN action items with file paths + acceptance criteria. | `skills/global-scope/ato-remediation-guidance/` |
-| `ato-poam-generator` | Skill | POA&M generator — Markdown + federal-submission CSV. Stable POAM-NNNN across runs. | `skills/global-scope/ato-poam-generator/` |
+| `ato-artifact-collector` | Stub skill + agent | Orchestrator. The thing you invoke. 8-step workflow + Step 1.5 vuln scan + post-Step-8 follow-ons. | `ato/skills/global-scope/ato-artifact-collector/` and `ato/agents/base/global-scope/ato-artifact-collector/` |
+| `ato-source-aws` | Skill | Read-only AWS evidence collector via `aws` CLI. US regions only. | `ato/skills/global-scope/ato-source-aws/` |
+| `ato-source-azure` | Skill | Read-only Azure evidence collector via `az` CLI. US regions only. | `ato/skills/global-scope/ato-source-azure/` |
+| `ato-source-sharepoint` | Skill | Read-only SharePoint Online / M365 team-site collector via `m365` CLI. Includes a content-based pre-scan (pulls first ~3 pages of each candidate doc and ranks per family via `ato-doc-summarizer`). | `ato/skills/global-scope/ato-source-sharepoint/` |
+| `ato-source-onedrive` | Skill | Read-only OneDrive for Business collector (per-user personal SharePoint sites) via `m365` CLI. Same pre-scan + summarization layer as SharePoint. Independent scope from `--sharepoint`. | `ato/skills/global-scope/ato-source-onedrive/` |
+| `ato-source-smb` | Skill | Read-only SMB / Windows-share collector. macOS / Linux / Windows. Includes a pre-mount existence probe (DNS + TCP/445) and a content-based document pre-scan via `ato-doc-summarizer`. | `ato/skills/global-scope/ato-source-smb/` |
+| `ato-doc-summarizer` | Sub-agent | Source-agnostic document summarizer invoked by SMB / SharePoint / OneDrive pre-scan. Reads extracted excerpts, returns a 2–3 sentence neutral summary + per-control-family confidence scores. Document text stays inside its isolated context. | `ato/agents/base/global-scope/ato-doc-summarizer/` |
+| `ato-vulnerability-scanner` | Stub skill + agent | Pre-collection vulnerability baseline (Step 1.5). Default-on. Standalone-invocable. | `ato/skills/global-scope/ato-vulnerability-scanner/` and `ato/agents/base/global-scope/ato-vulnerability-scanner/` |
+| `ato-remediation-guidance` | Skill | Developer punch list — turns gaps into RG-NNN action items with file paths + acceptance criteria. | `ato/skills/global-scope/ato-remediation-guidance/` |
+| `ato-poam-generator` | Skill | POA&M generator — Markdown + federal-submission CSV. Stable POAM-NNNN across runs. | `ato/skills/global-scope/ato-poam-generator/` |
+| `auth-config` | Skill | Resolves credentials for AWS / Azure / SharePoint / OneDrive / SMB via `~/.agent-skills/auth/auth.yaml`. Supports 1Password, Bitwarden, LastPass, Keeper, HashiCorp Vault, macOS Keychain, Windows Cred Manager, Linux libsecret, OAuth interactive, env vars, and user scripts. Read-only — never writes credentials. Every ATO source sibling preauths through it. | `ato/skills/global-scope/auth-config/` |
+| `auth-interview` | Skill | AskUserQuestion-driven bootstrap of `~/.agent-skills/auth/auth.yaml`. Detects installed vault CLIs, writes the file with `chmod 0600`, dry-validates each entry. Run once before the first ATO collection if you want vault-backed credentials. | `ato/skills/global-scope/auth-interview/` |
 
 The orchestrator invokes the others via the Skill tool; you only ever invoke the orchestrator (or the vulnerability scanner standalone, when you want a quick dependency / secret / SAST pass without the rest).
 
@@ -142,27 +144,54 @@ The orchestrator invokes the others via the Skill tool; you only ever invoke the
 
 ## Installation
 
-The ATO collection is installed by the standard `install.sh`:
+The ATO collection ships with its own dedicated installer at `ato/install.sh`. It installs **only** the ATO skills and agents (and the rendering machinery they need), independent of the rest of the AgentSkills corpus:
+
+**macOS / Linux:**
 
 ```bash
-# from the AgentSkills repo root
-bash install.sh --for claude
-# or for multiple CLIs at once:
-bash install.sh --for claude,opencode,codex
+# From the AgentSkills repo root:
+bash ato/install.sh --for claude
+# Or for multiple CLIs at once:
+bash ato/install.sh --for claude,opencode,codex
+
+# One-liner (no clone required):
+curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/ato/install.sh | bash -s -- --for claude
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+# From a clone, in the AgentSkills root:
+.\ato\install.ps1 -For claude
+
+# One-liner (no clone required):
+Set-ExecutionPolicy Bypass -Scope Process -Force
+$u='https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/ato/install.ps1'
+$f="$env:TEMP\ato-install.ps1"
+iwr -useb $u -OutFile $f; & $f -For claude
+```
+
+The PowerShell wrapper uses Git Bash (from Git for Windows) under the hood. If Git for Windows isn't already installed, it offers to install it via `winget` (or Chocolatey, or a manual download link as last-resort fallback) before continuing. Pass `-Yes` to skip the prompt; `-SkipGitInstall` to fail loudly instead.
+
+The `ato/` folder is self-contained — copy it anywhere (separate repo, internal share, archive) and `bash ato/install.sh` (or `.\ato\install.ps1` on Windows) works exactly the same way. The folder bundles the per-CLI renderers it needs; nothing else from the parent repo is required.
 
 This installs:
 
 - The 5 source skills (`ato-source-aws`, `ato-source-azure`, `ato-source-sharepoint`, `ato-source-onedrive`, `ato-source-smb`) and the 3 follow-on skills (`ato-remediation-guidance`, `ato-poam-generator`, `ato-vulnerability-scanner` stub) into your CLI's global skill directory.
+- The 2 auth skills `auth-config` and `auth-interview` — every ATO source sibling preauths through them (vault-backed credential resolution: 1Password, Bitwarden, Keychain, Vault, env vars, user scripts). They live canonically under `ato/` since ATO is their only consumer today.
 - The 3 agents (`ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-doc-summarizer`) into your CLI's global agent directory, rendered for the chosen CLI.
+
+The ATO installer writes its own manifest at `~/.agent-skills/ato-installer-manifest.json` — separate from the main `installer-manifest.json` — so the two installers don't trip over each other. The main installer also installs the ATO collection (it folds `ato/` content into its install set), so running both is idempotent. Uninstalling the ATO bundle removes everything it installed, including the auth skills; if you also use the main installer, re-run `bash install.sh` to refresh the generic side.
 
 Verify with `--list` first if you want a dry run:
 
 ```bash
-bash install.sh --for claude --list
+bash ato/install.sh --for claude --list
 ```
 
-You should see lines for `ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-doc-summarizer`, `ato-poam-generator`, `ato-remediation-guidance`, and the five `ato-source-*` skills.
+You should see lines for `ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-doc-summarizer`, `ato-poam-generator`, `ato-remediation-guidance`, `auth-config`, `auth-interview`, and the five `ato-source-*` skills.
+
+> **Want everything (ATO + the rest of the AgentSkills corpus)?** Run both installers — `bash install.sh --for claude` for the generic skills and `bash ato/install.sh --for claude` for the ATO subset. They're idempotent and don't overwrite each other's manifests.
 
 ---
 
@@ -427,7 +456,7 @@ Two rules to know:
 - **No file duplication within a family.** Files live once at the parent control level (`evidence/AC-02/`). Each per-Determine-If-ID sub-folder carries a `<FAMILY>_<CONTROL-ID>_<DETERMINE-IF-ID>_relevant-evidence.md` manifest pointing back at the parent files by relative path. The family + control + Determine If ID embedded in the filename keeps every manifest uniquely identifiable when an assessor flattens the package or copies files into a GRC tool — `_relevant-evidence.md` files would all collide under flattening.
 - **Skip-redundant-nesting for simple controls.** When a control has exactly one Determine If ID (e.g., `AC-03`), evidence sits directly in `evidence/AC-03/` — no `evidence/AC-03/AC-03/` redundant nest.
 
-The full naming rules and folder semantics are in `agents/base/global-scope/ato-artifact-collector/references/sub-control-enumeration.md`.
+The full naming rules and folder semantics are in `ato/agents/base/global-scope/ato-artifact-collector/references/sub-control-enumeration.md`.
 
 ### GRC assessment CSVs (`<cf>-assessment.csv` + `_master-assessment.csv`)
 
@@ -450,7 +479,7 @@ The master CSV is the master file most GRC tools want — all 20 families in one
 
 **`--no-assessment` flag.** When passed, the orchestrator emits a 7-column variant (drops `Result` and `Findings`) and skips the assessment pass and synthesis. Use this when you want the implementation-statement scaffolding without the assessment.
 
-The full schema spec, sort-order rules, and round-trip validation steps are in `agents/base/global-scope/ato-artifact-collector/references/csv-schema.md`.
+The full schema spec, sort-order rules, and round-trip validation steps are in `ato/agents/base/global-scope/ato-artifact-collector/references/csv-schema.md`.
 
 ### Sub-control assessment and synthesized drafts
 
@@ -474,7 +503,7 @@ The assessment pass (Step 6.5) reads each Determine If ID's requirement text fro
 
 The orchestrator MUST NOT mark a row `Satisfied` if the Findings paragraph contains gap language ("does not", "no document", "lacks", "missing", "is not specified", "cannot be assessed"). This is a hard rule enforced by a hygiene check; halt with a clear error if violated.
 
-The full template, decision rules, and worked examples (drawn from the AMIS spreadsheet) are in `agents/base/global-scope/ato-artifact-collector/references/assessment-template.md`.
+The full template, decision rules, and worked examples (drawn from the AMIS spreadsheet) are in `ato/agents/base/global-scope/ato-artifact-collector/references/assessment-template.md`.
 
 ### Gap-driven artifact synthesis
 
@@ -517,7 +546,7 @@ Concrete examples: `AC_AC-02_AC-02(d)_role-matrix-draft.md`, `AC_AC-02_AC-02(a)_
 - When the missing artifact is operational policy, signed documents, training certificates, or HR data. Those require human authorship.
 - When `--no-synthesize` was passed.
 
-The full gap-detection heuristic, draft templates, and auto-promote idempotency rules are in `agents/base/global-scope/ato-artifact-collector/references/synthesis-patterns.md`.
+The full gap-detection heuristic, draft templates, and auto-promote idempotency rules are in `ato/agents/base/global-scope/ato-artifact-collector/references/synthesis-patterns.md`.
 
 #### Worked example — AC-02(d) end-to-end
 
@@ -662,7 +691,7 @@ It does **not** store:
 - ❌ Passwords, API keys, tokens, refresh tokens, client secrets
 - ❌ Anything that looks like a stored secret — the orchestrator validates the config and refuses to run if it finds one
 
-If you want a richer auth flow (1Password, Vault, Bitwarden, etc.), use `auth-interview` once to bootstrap `~/.agent-skills/auth/auth.yaml`, and the source siblings will pick up the resolved session.
+If you want a richer auth flow (1Password, Vault, Bitwarden, Keychain, env vars, user scripts), use `auth-interview` once to bootstrap `~/.agent-skills/auth/auth.yaml`, and the source siblings will pick up the resolved session via `auth-config`. Both skills are bundled with the ATO installer (`ato/install.sh`), so they're already on disk after the first install — just trigger them by name from your CLI.
 
 ---
 

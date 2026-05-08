@@ -8,16 +8,32 @@ The tree is split into **global-scope** (user-level, installed once per CLI into
 
 ```
 skills/
-  global-scope/      # 15 skills — workflow utilities that work on any repo
-  repo-scope/        # 22 skills — toolchain-specific; pulled in by skill-sync
+  global-scope/      # workflow utilities that work on any repo (canonical for shared skills)
+  repo-scope/        # toolchain-specific; pulled in by skill-sync
 agents/
   base/              # canonical agent source (CLI-agnostic: agent.md + metadata.yaml)
-    global-scope/    # 5 agents today
+    global-scope/    # general-purpose agents
     repo-scope/      # 0 agents today; reserved
-  renderers/         # one script per CLI: claude.sh, opencode.sh, kilo.sh, gemini.sh, codex.sh
-install.sh           # per-CLI installer with --for <cli>[,<cli>...]
+  renderers/         # canonical per-CLI renderers: claude.sh, opencode.sh, kilo.sh, gemini.sh, codex.sh
+install.sh           # all-in-one installer: --for <cli>[,<cli>...]
+ato/                 # ATO (NIST 800-53) collection — independently shareable subset
+  skills/            # ATO skills (canonical) + auth-* mirrors (kept in sync)
+  agents/            # ATO agents + bundled renderer mirrors (kept in sync)
+  install.sh         # ATO-only installer (writes its own manifest)
+  README.md          # ATO user guide
+bin/
+  sync-ato.sh        # propagate canonical → ato/ mirrors; --check for CI/precommit
+  install-hooks.sh   # opt-in: sets core.hooksPath = .githooks
+.githooks/
+  pre-commit         # runs sync-ato.sh --check
+.github/workflows/
+  sync-check.yml     # runs sync-ato.sh --check on every PR
 CLAUDE.md            # conventions for contributors editing this repo
 ```
+
+The ATO collection lives under its own `ato/` subtree and ships with its own dedicated installer. The folder is **self-contained** — copy it anywhere (separate repo, internal share) and `bash ato/install.sh` works the same way. See [ato/README.md](ato/README.md) for the full ATO user guide.
+
+**Source-of-truth model.** Everything ATO-specific (including `auth-config` and `auth-interview`, since ATO is their only current consumer) lives canonically under `ato/`. The only thing mirrored is the per-CLI renderers — canonical at `agents/renderers/`, copies at `ato/agents/renderers/` so the standalone ATO bundle can render agents without the parent repo. Edit the canonical renderer, run `bin/sync-ato.sh`, commit. The pre-commit hook and CI both run `bin/sync-ato.sh --check`, so drift fails fast.
 
 ## CLI support
 
@@ -28,6 +44,10 @@ CLAUDE.md            # conventions for contributors editing this repo
 | Kilo Code | `~/.config/kilo/` | `<repo>/.kilo/` | `<name>.md` |
 | OpenAI Codex | `~/.codex/` | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` |
 | Gemini CLI | `~/.gemini/` | `<repo>/.gemini/` | `<name>.md` |
+| Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | _(skills only)_ |
+| Cursor | `~/.cursor/` | `<repo>/.cursor/` | `<name>.mdc` |
+
+**Native Windows support.** `install.ps1` and `ato/install.ps1` are the Windows entry points: they detect Git Bash, offer to install Git for Windows (via `winget` → Chocolatey → manual fallback) if missing, then forward to the bash installers. CLI directories follow the same convention with `~` resolving to `%USERPROFILE%`.
 
 Claude Code additionally gets skills (`~/.claude/skills/` + `<repo>/.claude/skills/`); the other CLIs handle skill-like content differently and are agent-only today.
 
@@ -35,7 +55,7 @@ Claude Code additionally gets skills (`~/.claude/skills/` + `<repo>/.claude/skil
 
 **Agents** are isolated-context subprocesses invoked via the `Agent` tool. They handle multi-step investigations without polluting the parent conversation.
 
-**Scope-selection rule.** A skill / agent lives in `global-scope/` if it works on any repo regardless of language (`deep-review`, `branch-review`, `bdd-audit`, `coverage-audit`, `repo-health`, `merge-sprint`, `skill-sync`, `skill-interview`, `auth-config`, `auth-interview`). It lives in `repo-scope/` if it is meaningful only when a specific toolchain or target is present.
+**Scope-selection rule.** A skill / agent lives in `global-scope/` if it works on any repo regardless of language (`deep-review`, `branch-review`, `bdd-audit`, `coverage-audit`, `repo-health`, `merge-sprint`, `skill-sync`, `skill-interview`). It lives in `repo-scope/` if it is meaningful only when a specific toolchain or target is present. The auth skills (`auth-config`, `auth-interview`) live under `ato/` today since ATO is their only consumer; they'd be promoted to `skills/global-scope/` if a non-ATO consumer appears.
 
 Some skills are **thin stubs paired with an agent** — the skill triggers on user intent (preserving slash-command discoverability like `/branch-review`); the agent does the work in its own context. Paired stubs and their agents always live in matching scopes:
 
@@ -100,15 +120,23 @@ All 37 skills and 5 agents, grouped by purpose. **Scope** indicates whether the 
 | `web-app-deploy` | Web / server: Fly.io, Render, Railway, Vercel, Netlify, Heroku, DO App Platform, bare-metal SSH | Platform CLI (`flyctl`, `vercel`, …) + ambient auth | Invoked by `deploy-app` when project is web |
 | `container-app-deploy` | Build OCI / Docker image and push to Docker Hub / GHCR / ECR / GCR / ACR / Quay; multi-arch via buildx | Docker or Podman / Buildah; registry credentials | Invoked by `deploy-app` when project has `Dockerfile` |
 
-### ATO / NIST 800-53 compliance _(all global-scope)_
+### ATO / NIST 800-53 compliance _(all global-scope; lives under `ato/`, installed by `bash ato/install.sh`)_
+
+The ATO collection is a self-contained subset under [`ato/`](ato/). Install with `bash ato/install.sh --for <cli>` (separate from the main installer). Full user guide at [ato/README.md](ato/README.md).
 
 | Skill | What it does | Dependencies | How to use |
 |---|---|---|---|
 | `ato-artifact-collector` | Thin stub → agent. Orchestrates NIST 800-53 evidence collection across repo + optional external sources | git; sibling skills as scoped | Trigger: "ATO", "NIST 800-53", "collect security artifacts" |
 | `ato-source-aws` | Sibling. Read-only AWS evidence via `mcp__AWS_API_MCP_Server__call_aws` (US regions only) | AWS MCP server + ambient AWS session | Invoked by orchestrator when AWS scope confirmed |
 | `ato-source-azure` | Sibling. Read-only Azure evidence via `az` CLI (US regions only) | `az` CLI + ambient Azure session | Invoked by orchestrator when Azure scope confirmed |
-| `ato-source-sharepoint` | Sibling. Read-only M365 / SharePoint / OneDrive evidence via `m365` CLI | `pnp/cli-microsoft365` (`m365`) + ambient M365 session | Invoked by orchestrator when SharePoint scope confirmed |
-| `ato-source-smb` | Sibling. Read-only SMB / Windows file-share evidence; cross-platform | `mount_smbfs` (macOS) / `mount.cifs` or gvfs (Linux) / UNC (Windows) + ambient auth | Invoked by orchestrator when SMB scope confirmed |
+| `ato-source-sharepoint` | Sibling. Read-only SharePoint Online team-site evidence via `m365` CLI; includes content-based pre-scan | `pnp/cli-microsoft365` (`m365`) + ambient M365 session; optional `pdftotext`/`pandoc`/`unzip` | Invoked by orchestrator when SharePoint scope confirmed |
+| `ato-source-onedrive` | Sibling. Read-only OneDrive for Business evidence (per-user personal sites) via `m365` CLI; same pre-scan layer | `m365` + delegated access to each user's OneDrive | Invoked by orchestrator when OneDrive scope confirmed |
+| `ato-source-smb` | Sibling. Read-only SMB / Windows file-share evidence; cross-platform; pre-mount probe + content pre-scan | `mount_smbfs` (macOS) / `mount.cifs` or gvfs (Linux) / UNC (Windows) + ambient auth | Invoked by orchestrator when SMB scope confirmed |
+| `ato-vulnerability-scanner` | Stub → agent. Pre-collection vulnerability baseline (Step 1.5) | Language scanners as available (cargo-audit, pip-audit, etc.) | Auto-runs before Step 2 unless `--no-vuln-scan` |
+| `ato-remediation-guidance` | Generates `REMEDIATION_GUIDANCE.md` punch list from package gaps | Existing ATO package | Auto-runs with `--remediation` (or invoke standalone) |
+| `ato-poam-generator` | Generates POA&M Markdown + federal-submission CSV | Existing ATO package + remediation output | Auto-runs with `--poam` (implies `--remediation`) |
+| `auth-config` | Resolves credentials for AWS / Azure / SharePoint / OneDrive / SMB via `~/.agent-skills/auth/auth.yaml`. Supports 1Password, Bitwarden, LastPass, Keeper, HashiCorp Vault, macOS Keychain, Windows Cred Manager, Linux libsecret, OAuth, env vars, user scripts. Read-only — never writes credentials | User's vault CLI (op / bw / vault / security / …) + `~/.agent-skills/auth/auth.yaml` | Lives canonically under `ato/`. Invoked by every ATO source sibling's preauth step. |
+| `auth-interview` | AskUserQuestion-driven bootstrap of `~/.agent-skills/auth/auth.yaml`. Detects installed vault CLIs, writes the file `chmod 0600`, dry-validates each entry | `AskUserQuestion`; vault CLIs at runtime | Lives canonically under `ato/`. Run once before the first ATO collection if you want vault-backed credentials. |
 
 ### Provisioning _(all global-scope)_
 
@@ -117,12 +145,9 @@ All 37 skills and 5 agents, grouped by purpose. **Scope** indicates whether the 
 | `skill-sync` | Detects toolchains, fetches the matching subset of `repo-scope/` skills + agents from the source repo, writes `.sync-manifest.json` for idempotent re-runs | `gh` or git over SSH + `~/.claude/skill-sync.config.yaml` | Trigger: "skill-sync", "install skills for this repo" |
 | `skill-interview` | Greenfield: interviews the user about languages / frameworks / deploy targets, then delegates to `skill-sync` | `AskUserQuestion` + `skill-sync` | Trigger: "new repo", "set up skills for a fresh project" |
 
-### Credentials _(all global-scope)_
+### Credentials
 
-| Skill | What it does | Dependencies | How to use |
-|---|---|---|---|
-| `auth-config` | Resolves credentials for external resources (AWS, Azure, SharePoint, SMB, LLM APIs) via `~/.agent-skills/auth/auth.yaml`. Supports 1Password, Bitwarden, LastPass, Keeper, HashiCorp Vault, macOS Keychain, Windows Cred Manager, Linux libsecret, OAuth interactive, env vars, and user scripts. Read-only — never writes credentials | Whatever vault CLI the user configured (`op`, `bw`, `vault`, `security`, …); the config file with `0600` perms | Invoked by any skill that needs to authenticate against an external resource before the call. ATO source skills call it first; fall back to ambient session if no entry exists |
-| `auth-interview` | AskUserQuestion-driven bootstrap of `auth.yaml`. Asks which external sources + LLM providers the user uses, detects installed vault CLIs, writes the file with `chmod 0600` and dry-validates each entry | `AskUserQuestion`; detects `op`/`bw`/`lpass`/`keeper`/`vault`/`security`/`cmdkey`/`secret-tool`/`az`/`m365` at runtime | Trigger: "set up auth", "configure credentials", "first-time setup" |
+`auth-config` and `auth-interview` are listed above in the ATO section — they live under `ato/` since the ATO source siblings are their only consumer today. They're general-purpose by design (supporting AWS, Azure, M365, SMB, plus LLM-provider keys for any future multi-model agent), so if a non-ATO consumer appears, they get promoted back to `skills/global-scope/`. Until then, they ship with the ATO bundle.
 
 ### Opinionated templates _(repo-scope, opt-in)_
 
@@ -138,17 +163,50 @@ All 37 skills and 5 agents, grouped by purpose. **Scope** indicates whether the 
 | `bdd-audit` | Classifies each feature area as wired / partially / stubbed / missing; diagnoses implemented-but-untested vs truly-missing vs deferred. **Read-only.** | global | Bash, Read, Grep, Glob | Invoked by the `bdd-audit` stub skill |
 | `branch-review` | Audits every unmerged branch, classifies each, flags merge risks, writes `CHANGES.md`, returns a recommendation table. Only write is `CHANGES.md`. | global | Bash, Read, Write, Grep, Glob | Invoked by the `branch-review` stub skill |
 | `coverage-investigator` | Deep dive on a single low-coverage file/module: classifies each uncovered entry point (pure / injectable / hard-wired / dead / integration-only), estimates effort, recommends next action. **Read-only.** | global | Bash, Read, Grep, Glob | Invoked by `coverage-audit` when the user asks "why is this file low?" |
-| `ato-artifact-collector` | 8-step NIST 800-53 evidence-collection orchestrator. Produces `docs/ato-package/` with 20+ evidence families, narrative docs with `[CR-NNN]` citations, `INDEX.md` + `CHECKLIST.md` + `CODE_REFERENCES.md` | global | Bash, Read, Write, Edit, Grep, Glob, Skill | Invoked by the `ato-artifact-collector` stub skill after scope is confirmed |
+| `ato-artifact-collector` | 8-step NIST 800-53 evidence-collection orchestrator. Produces `docs/ato-package/` with 20+ evidence families, narrative docs with `[CR-NNN]` citations, `INDEX.md` + `CHECKLIST.md` + `CODE_REFERENCES.md` | global (under `ato/`) | Bash, Read, Write, Edit, Grep, Glob, Skill | Invoked by the `ato-artifact-collector` stub skill after scope is confirmed |
+| `ato-vulnerability-scanner` | Pre-collection vulnerability baseline — runs language-specific advisory scanners (cargo-audit, pip-audit, govulncheck, etc.) plus secret scanning and SAST | global (under `ato/`) | Bash, Read, Write, Grep, Glob, Skill | Auto-invoked at Step 1.5 of the orchestrator; standalone via `/ato-vulnerability-scanner` |
+| `ato-doc-summarizer` | Source-agnostic document summarizer — reads pre-extracted excerpts and returns 2–3 sentence neutral summaries plus per-control-family confidence scores | global (under `ato/`) | Bash, Read, Write, Grep, Glob | Invoked by `ato-source-{smb,sharepoint,onedrive}` during pre-scan |
 
 ## Quick start
 
 ### 0. Install the global-scope skills + agents for your CLI(s)
 
-**One-liner for a single CLI** (no clone required):
+**Two installers, one source of truth:**
+
+- `bash install.sh` — the all-in-one installer. Walks both the generic tree (`skills/`, `agents/`) AND the `ato/` subtree, so a single command installs the full corpus plus the ATO collection.
+- `bash ato/install.sh` — installs **only** the ATO subset. The `ato/` folder is independently shareable: copy it onto a shared drive and `bash ato/install.sh` works without the rest of this repo. The subset bundles its own copies of the auth skills and the per-CLI renderers; `bin/sync-ato.sh` keeps them in sync with their canonical sources (verified by a pre-commit hook and CI).
+
+**macOS / Linux — one-liner for the full corpus (single CLI, no clone required):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude
+curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude
 ```
+
+**macOS / Linux — one-liner for just the ATO collection:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/ato/install.sh | bash -s -- --for claude
+```
+
+**Windows (PowerShell) — full corpus:**
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+$u='https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.ps1'
+$f="$env:TEMP\agentskills-install.ps1"
+iwr -useb $u -OutFile $f; & $f -For claude
+```
+
+**Windows (PowerShell) — ATO only:**
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+$u='https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/ato/install.ps1'
+$f="$env:TEMP\ato-install.ps1"
+iwr -useb $u -OutFile $f; & $f -For claude
+```
+
+The PowerShell scripts use Git Bash (from Git for Windows) under the hood. If Git for Windows isn't installed, they offer to install it via `winget` (or Chocolatey, or a manual download link as last-resort fallback). Pass `-Yes` to skip the prompt; pass `-SkipGitInstall` to fail loudly instead of installing.
 
 **Install for several CLIs at once:**
 
@@ -196,7 +254,7 @@ curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/in
 | `--keep-cache <dir>` | After install, move the extracted repo to `<dir>` for offline re-use. |
 | `-y`, `--yes` | Skip the interactive confirmation (required under `curl \| bash` without a TTY — pass `-y` in that case). |
 
-After install, `skill-sync`, `skill-interview`, `repo-health`, `branch-review`, `bdd-audit`, `coverage-audit`, `merge-sprint`, `deep-review`, `auth-config`, `auth-interview`, and the ATO family are available in every repo without further install (for Claude Code — other CLIs get the agents only, not the skills).
+After install, `skill-sync`, `skill-interview`, `repo-health`, `branch-review`, `bdd-audit`, `coverage-audit`, `merge-sprint`, `deep-review`, `auth-config`, `auth-interview`, and the full ATO family (`ato-artifact-collector`, the five `ato-source-*` skills, `ato-vulnerability-scanner`, `ato-remediation-guidance`, `ato-poam-generator`) are all available in every repo without further install (for Claude Code — other CLIs get the agents only, not the skills). Use `bash ato/install.sh --for <cli>` if you only want the ATO subset (e.g., on a per-team shared drive that doesn't need the rest of the corpus).
 
 **Kilo cross-scan note.** Kilo by default scans `.claude/`, `.opencode/`, and `.agents/` directories in addition to its own. If you install for Kilo *only* (`--for kilo`), the installer prints instructions to isolate Kilo from those other directories. If you install for Kilo alongside other CLIs, cross-scan is left enabled (assumption: you want visibility).
 
