@@ -1,5 +1,13 @@
 # SharePoint Discovery Patterns
 
+> **Role of this table after pre-scan landed.** The patterns below are now a
+> **first-pass filter** — they decide which files Step 4 (DISCOVER) considers
+> as candidates and provide a `filename_hint` the `ato-doc-summarizer` agent
+> uses only as a tie-breaker. The primary relevance signal is the agent's
+> content-based summary of each candidate's first ~3 pages. In legacy mode
+> (`"prescan": false` in the scope, or summarizer error) this table is the
+> only signal — the same behavior as before pre-scan landed.
+
 Maps filename patterns and SharePoint locations to the 20 control families in
 `ato-artifact-collector/references/artifact-mappings.md`. When a file matches
 multiple patterns, map it to every family that claims it and download-once /

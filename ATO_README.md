@@ -33,7 +33,7 @@ This guide is task-oriented. If you just want to produce a package, jump to [Qui
 The ATO collection turns an existing source repository (plus optional cloud / SharePoint / SMB scope) into a structured evidence package suitable for an authoring team to walk into an ATO assessment with. The orchestrator does six things in one run:
 
 1. **Discovers** evidence already in the repo (configs, IaC, threat models, IRP attachments, etc.).
-2. **Pulls** evidence from external systems you opt into (AWS Config / IAM / CloudTrail; Azure Policy / RBAC / NSGs; SharePoint policy docs; SMB DR runbooks).
+2. **Pulls** evidence from external systems you opt into (AWS Config / IAM / CloudTrail; Azure Policy / RBAC / NSGs; SharePoint Online policy docs; OneDrive for Business per-user evidence; SMB DR runbooks). Document-shaped sources (SharePoint, OneDrive, SMB) run a content-based pre-scan and rank candidates by control-family confidence before copying — filename patterns alone are a weak relevance signal.
 3. **Runs a vulnerability baseline** (cargo-audit, npm audit, pip-audit, govulncheck, dependency-check, trivy, gitleaks, semgrep, osv-scanner — whichever apply to the repo's languages and are on PATH).
 4. **Generates** narrative documents (per-SSP-section evidence files and per-control-family implementation statements) that synthesize what was discovered.
 5. **Indexes** everything in `INDEX.md`, `CHECKLIST.md`, and `CODE_REFERENCES.md` with stable `[CR-NNN]` citations linking back to source files / external resources.
@@ -128,8 +128,10 @@ Empty SSP sections and control families are still created — each carries a `*-
 | `ato-artifact-collector` | Stub skill + agent | Orchestrator. The thing you invoke. 8-step workflow + Step 1.5 vuln scan + post-Step-8 follow-ons. | `skills/global-scope/ato-artifact-collector/` and `agents/base/global-scope/ato-artifact-collector/` |
 | `ato-source-aws` | Skill | Read-only AWS evidence collector via `aws` CLI. US regions only. | `skills/global-scope/ato-source-aws/` |
 | `ato-source-azure` | Skill | Read-only Azure evidence collector via `az` CLI. US regions only. | `skills/global-scope/ato-source-azure/` |
-| `ato-source-sharepoint` | Skill | Read-only SharePoint / M365 / OneDrive collector via `m365` CLI. | `skills/global-scope/ato-source-sharepoint/` |
-| `ato-source-smb` | Skill | Read-only SMB / Windows-share collector. macOS / Linux / Windows. | `skills/global-scope/ato-source-smb/` |
+| `ato-source-sharepoint` | Skill | Read-only SharePoint Online / M365 team-site collector via `m365` CLI. Includes a content-based pre-scan (pulls first ~3 pages of each candidate doc and ranks per family via `ato-doc-summarizer`). | `skills/global-scope/ato-source-sharepoint/` |
+| `ato-source-onedrive` | Skill | Read-only OneDrive for Business collector (per-user personal SharePoint sites) via `m365` CLI. Same pre-scan + summarization layer as SharePoint. Independent scope from `--sharepoint`. | `skills/global-scope/ato-source-onedrive/` |
+| `ato-source-smb` | Skill | Read-only SMB / Windows-share collector. macOS / Linux / Windows. Includes a pre-mount existence probe (DNS + TCP/445) and a content-based document pre-scan via `ato-doc-summarizer`. | `skills/global-scope/ato-source-smb/` |
+| `ato-doc-summarizer` | Sub-agent | Source-agnostic document summarizer invoked by SMB / SharePoint / OneDrive pre-scan. Reads extracted excerpts, returns a 2–3 sentence neutral summary + per-control-family confidence scores. Document text stays inside its isolated context. | `agents/base/global-scope/ato-doc-summarizer/` |
 | `ato-vulnerability-scanner` | Stub skill + agent | Pre-collection vulnerability baseline (Step 1.5). Default-on. Standalone-invocable. | `skills/global-scope/ato-vulnerability-scanner/` and `agents/base/global-scope/ato-vulnerability-scanner/` |
 | `ato-remediation-guidance` | Skill | Developer punch list — turns gaps into RG-NNN action items with file paths + acceptance criteria. | `skills/global-scope/ato-remediation-guidance/` |
 | `ato-poam-generator` | Skill | POA&M generator — Markdown + federal-submission CSV. Stable POAM-NNNN across runs. | `skills/global-scope/ato-poam-generator/` |
@@ -151,8 +153,8 @@ bash install.sh --for claude,opencode,codex
 
 This installs:
 
-- The 5 source skills (`ato-source-*`) and the 3 follow-on skills (`ato-remediation-guidance`, `ato-poam-generator`, `ato-vulnerability-scanner` stub) into your CLI's global skill directory.
-- The 2 agents (`ato-artifact-collector`, `ato-vulnerability-scanner`) into your CLI's global agent directory, rendered for the chosen CLI.
+- The 5 source skills (`ato-source-aws`, `ato-source-azure`, `ato-source-sharepoint`, `ato-source-onedrive`, `ato-source-smb`) and the 3 follow-on skills (`ato-remediation-guidance`, `ato-poam-generator`, `ato-vulnerability-scanner` stub) into your CLI's global skill directory.
+- The 3 agents (`ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-doc-summarizer`) into your CLI's global agent directory, rendered for the chosen CLI.
 
 Verify with `--list` first if you want a dry run:
 
@@ -160,7 +162,7 @@ Verify with `--list` first if you want a dry run:
 bash install.sh --for claude --list
 ```
 
-You should see lines for `ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-poam-generator`, `ato-remediation-guidance`, and the four `ato-source-*` skills.
+You should see lines for `ato-artifact-collector`, `ato-vulnerability-scanner`, `ato-doc-summarizer`, `ato-poam-generator`, `ato-remediation-guidance`, and the five `ato-source-*` skills.
 
 ---
 
@@ -181,8 +183,9 @@ You should see lines for `ato-artifact-collector`, `ato-vulnerability-scanner`, 
 | **Vulnerability scanner — Always** | — | `gitleaks`, `semgrep`, `osv-scanner` |
 | **AWS source** | `aws` CLI, ambient AWS session (`aws sso login` etc.) | — |
 | **Azure source** | `az` CLI, ambient Azure session | An `azureauth`-style helper script |
-| **SharePoint source** | `m365` CLI, ambient M365 session | — |
-| **SMB source** | OS mount tools (`mount_smbfs` / `mount.cifs` / native UNC) | Kerberos ticket for sites using AD auth |
+| **SharePoint source** | `m365` CLI, ambient M365 session | `pdftotext` (poppler) + `pandoc` + `unzip` for pre-scan content extraction |
+| **OneDrive source** | `m365` CLI, ambient M365 session, **delegated access** to each configured user's OneDrive | `pdftotext` + `pandoc` + `unzip` for pre-scan content extraction |
+| **SMB source** | OS mount tools (`mount_smbfs` / `mount.cifs` / native UNC) | Kerberos ticket for sites using AD auth; `pdftotext` + `pandoc` + `unzip` for pre-scan; `dig`/`host`/`getent`/`nc` for the pre-mount existence probe |
 
 The vulnerability scanner **never auto-installs** missing tools. Anything missing becomes a "Coverage gap" entry in the scan report — the run continues with whatever is available. Install what you want covered, then re-run.
 
@@ -232,12 +235,22 @@ The orchestrator will read `~/.claude/skills/ato-artifact-collector/config.yaml`
 ### Scenario 4 — "Everything"
 
 ```text
-/ato-artifact-collector --aws --azure --sharepoint --smb --remediation --poam
+/ato-artifact-collector --aws --azure --sharepoint --onedrive --smb --remediation --poam
 ```
 
-Full multi-source collection plus the two follow-on artifacts.
+Full multi-source collection (all five external sources plus the repo) plus the two follow-on artifacts.
 
-### Scenario 5 — "I just want a vuln scan; no full collection"
+### Scenario 5 — "Refresh just the external evidence in an existing package"
+
+When the repo is on a different machine, or you only want to re-pull the SharePoint / OneDrive / SMB / cloud evidence into an existing package:
+
+```text
+/ato-artifact-collector --no-repo --sharepoint --onedrive
+```
+
+Skips the vuln scan, repo discovery, and deep code analysis. The narrative-generation, sub-control routing, assessment, synthesis, CSV emission, citation merge, and INDEX/CHECKLIST steps still run over whatever the siblings produced. Bare `--no-repo` (no external flags) is a usage error.
+
+### Scenario 6 — "I just want a vuln scan; no full collection"
 
 ```text
 /ato-vulnerability-scanner
@@ -255,13 +268,15 @@ All flags live on `/ato-artifact-collector`. The `ato-vulnerability-scanner` sta
 
 | Flag | Effect |
 |---|---|
-| `--repo` | Mark repo scope explicitly. Always implied — the flag exists to make "repo-only, skip the interview" expressible. |
+| `--repo` | Mark repo scope explicitly. Always implied unless `--no-repo` is set — the flag exists to make "repo-only, skip the interview" expressible. |
+| `--no-repo` | **Disable** the repo as a source. Skips Step 1.5 (vuln scan), Step 2 (Discover), the repo-file portion of Step 3 (Collect), and Step 5 (Deep Code Analysis); Steps 4, 6, 6.5–6.7, 7, and 8 still run, working purely from sibling-collected evidence. **Implies `--no-vuln-scan`** (the scanner has nothing to scan). **Requires at least one external source flag** — bare `--no-repo` is a usage error. Combining `--no-repo` with `--repo` is a usage error. Use this when the repo isn't accessible from the host or you want to refresh only the external-evidence portions of an existing package. |
 | `--aws` | Enable the AWS source. Skips the AWS y/N prompt. Requires ambient `aws` CLI auth. |
 | `--azure` | Enable the Azure source. Skips the Azure y/N prompt. Requires ambient `az` CLI auth. |
-| `--sharepoint sites:[<Site URL>]` | Enable the SharePoint / M365 source. Skips the SharePoint y/N prompt. Requires ambient `m365` CLI auth. |
+| `--sharepoint sites:[<Site URL>]` | Enable the SharePoint Online team-site source. Skips the SharePoint y/N prompt. Requires ambient `m365` CLI auth. |
+| `--onedrive` | Enable the OneDrive for Business (per-user personal sites) source. Skips the OneDrive y/N prompt. Requires ambient `m365` CLI auth **and** that the logged-in identity has delegated access to each configured user's OneDrive. Independent from `--sharepoint` — set them together or separately. |
 | `--smb` | Enable the SMB source. Skips the SMB y/N prompt. Requires OS mount helpers configured. |
 
-**Precedence rule.** If **any** source flag is present, the interactive scope-confirmation interview is skipped entirely; unflagged sources are disabled. If no source flags are present, the orchestrator falls back to interactive y/N prompts for any source not explicitly disabled in config.
+**Precedence rule.** If **any** source flag is present (including `--no-repo`), the interactive scope-confirmation interview is skipped entirely; unflagged external sources are disabled. The repo is enabled by default in flag mode unless `--no-repo` is passed. If no source flags are present, the orchestrator falls back to interactive y/N prompts for any source not explicitly disabled in config.
 
 ### Output-control flags
 
@@ -283,8 +298,13 @@ All flags live on `/ato-artifact-collector`. The `ato-vulnerability-scanner` sta
 | `--repo --no-vuln-scan` | Skip interview; repo only; no vuln scan |
 | `--repo --remediation` | Skip interview; repo only; vuln scan on; auto-remediation |
 | `--repo --poam` | Skip interview; repo only; vuln scan on; auto-remediation (implied); POA&M |
-| `--aws --azure` | Skip interview; AWS + Azure (no SharePoint, no SMB); vuln scan on |
-| `--aws --azure --sharepoint --smb --remediation --poam` | Full external + follow-ons |
+| `--aws --azure` | Skip interview; AWS + Azure (no SharePoint, no OneDrive, no SMB); vuln scan on |
+| `--repo --sharepoint --onedrive` | Skip interview; repo + SharePoint sites + per-user OneDrive evidence; vuln scan on |
+| `--no-repo --sharepoint` | Skip interview; SharePoint only (no repo discovery, no deep code analysis, no vuln scan) |
+| `--no-repo --smb --aws` | Skip interview; SMB + AWS only; no repo; no vuln scan |
+| `--aws --azure --sharepoint --onedrive --smb --remediation --poam` | Full external collection (all five external sources) + follow-ons |
+| `--no-repo` (alone) | **Usage error** — no sources to collect from |
+| `--repo --no-repo` | **Usage error** — contradictory flags |
 
 ---
 
@@ -317,7 +337,7 @@ Step 6.6  SYNTHESIZE For each NotSatisfied row where the gap is "implementation 
 Step 6.7  CSV        Emit per-family <cf>-assessment.csv and _master-assessment.csv
                      (9-column GRC schema with Result/Findings populated, RFC-4180 quoting)
 Step 7    CITATIONS  Merge [CR-NNN] from repo + sibling staging batches
-                     (sharepoint / aws / azure / smb / vulnscan) into CODE_REFERENCES.md
+                     (sharepoint / onedrive / aws / azure / smb / vulnscan) into CODE_REFERENCES.md
 Step 8    INDEX      Produce INDEX.md and CHECKLIST.md
 
 After Step 8, conditional on flags:
@@ -328,7 +348,32 @@ Step 10   POAM         --poam → invoke ato-poam-generator
 
 Step 1.5 is synchronous — the orchestrator waits for the vulnerability scan to finish before moving to discovery. The scan caps each tool at 10 minutes; total Step 1.5 time is typically 1–10 minutes depending on toolchain.
 
-External-source siblings (AWS / Azure / SharePoint / SMB) run sequentially after Step 1.5. If one fails (auth missing, scope declined, US-region check), the orchestrator records the failure and continues with the others — graceful degradation is required, not optional.
+External-source siblings (AWS / Azure / SharePoint / OneDrive / SMB) run sequentially after Step 1.5. If one fails (auth missing, scope declined, US-region check), the orchestrator records the failure and continues with the others — graceful degradation is required, not optional.
+
+**Document siblings (SMB / SharePoint / OneDrive) include a pre-scan step.** Each runs `scripts/<source>-walk-extract.sh` to extract the first ~3 pages of every candidate document into `.staging/`, then invokes the `ato-doc-summarizer` sub-agent which returns a 2–3 sentence neutral summary plus per-control-family confidence scores. The COPY step only copies high/medium-confidence files; document text never enters the source sibling's main context. Citation rows for these sources carry `prescan_id` + `prescan_confidence` fields. If the extractors (`pdftotext`, `pandoc`, `unzip`) aren't on PATH, the sibling falls back to the legacy filename-only flow.
+
+### Running without the repo (`--no-repo`)
+
+When `--no-repo` is set the orchestrator's repo-dependent steps are gated off:
+
+| Step | Behavior with `--no-repo` |
+|---|---|
+| 1.5 VULNSCAN | Skipped (implied `--no-vuln-scan`; the scanner has nothing to scan) |
+| 2 DISCOVER | Skipped for repo discovery; sibling-driven discovery still runs |
+| 3 COLLECT | Skipped for repo files; siblings still copy their evidence into the package |
+| 5 ANALYZE | Skipped (deep code analysis requires the repo) |
+| 4, 6, 6.5–6.7, 7, 8 | Run normally over whatever evidence the siblings produced |
+
+Use this when the repo isn't accessible from the host (different machine, different network), or when you want to refresh only the external-evidence portions of an existing package without re-running the full repo workflow. At least one external source flag (`--aws`, `--azure`, `--sharepoint`, `--onedrive`, `--smb`) must be set — bare `--no-repo` is rejected.
+
+### SMB pre-mount existence probe
+
+Before mounting any share, the SMB sibling's Step 2 (VALIDATE) runs `scripts/smb-probe-host.sh` per share. The probe parses all three accepted location forms (`smb://host/share`, `//host/share`, `\\host\share`), DNS-resolves the host (using `dig`, `host`, or `getent` — whichever is available), and TCP-probes port 445 (using `nc` or a `/dev/tcp` shim). Behavior:
+
+- **Best-effort.** If no resolver / prober is on PATH, the probe degrades to a "not checked" status and the run continues.
+- **Per-share failure isolation.** Unresolved host or closed port writes `.staging/smb-error.json` for that share and skips it; remaining shares still proceed.
+- **All-shares-failed aborts.** If every configured share fails the probe, the run aborts before MOUNT.
+- **Surfaced in CONFIRM.** Probe results appear in the Step 3 CONFIRM block so the operator sees reachability state before authorizing the mount.
 
 ---
 
@@ -336,7 +381,9 @@ External-source siblings (AWS / Azure / SharePoint / SMB) run sequentially after
 
 ### Citation IDs
 
-Every external reference in the package resolves to a `[CR-NNN]` ID listed in `CODE_REFERENCES.md`. The `Source` column is one of: `repo`, `sharepoint`, `aws`, `azure`, `smb`, `vulnscan`. Permalinks are pinned to the commit SHA from the run, so they remain valid even after the branch moves.
+Every external reference in the package resolves to a `[CR-NNN]` ID listed in `CODE_REFERENCES.md`. The `Source` column is one of: `repo`, `sharepoint`, `onedrive`, `aws`, `azure`, `smb`, `vulnscan`. Permalinks are pinned to the commit SHA from the run, so they remain valid even after the branch moves.
+
+For document-shaped sources (`sharepoint`, `onedrive`, `smb`), citation rows additionally carry `prescan_id` (a stable handle into the per-source `.staging/<source>-inventory.json`) and `prescan_confidence` (`high` / `medium` / `low`). The `Purpose` column reflects the `ato-doc-summarizer` agent's neutral 2–3 sentence summary, not a templated guess from the filename.
 
 For cloud sources (AWS / Azure), the `Local digest` column links to the human-readable Markdown summary the source sibling synthesized — that's the file you read first; the raw JSON is referenced from inside it.
 
@@ -575,6 +622,23 @@ m365 login --authType browser (for interative)
 
 Verify with `m365 status`. No region restriction — Microsoft 365 is tenant-scoped. Service-account auth and pre-established sessions are supported via `auth.method: service-account` or `existing` in config.
 
+### OneDrive for Business
+
+OneDrive uses the same `m365` CLI session as SharePoint — log in once, both sources work:
+
+```bash
+m365 login --authType browser
+m365 status                # confirms tenant + identity
+```
+
+Additional requirement specific to OneDrive: the logged-in identity must have **delegated access** to each user's OneDrive that you intend to scan. The skill never requests access; missing access is recorded as a 403 partial failure for that user and the run continues. Common ways to grant delegated access in M365:
+
+- The user shares their OneDrive root folder with the ATO-collection identity.
+- A tenant admin grants `Sites.Read.All` (application permission) to a service-principal-style identity used only for ATO collection.
+- The ATO-collection identity is added as a secondary admin on each in-scope user's OneDrive.
+
+OneDrive scope is independent from SharePoint — you can run either alone or both together.
+
 ### SMB / Windows shares
 
 Mount the share through whatever mechanism your environment uses **before** launching the orchestrator:
@@ -621,14 +685,33 @@ sharepoint:
   tenant: contoso
   sites:
     - https://contoso.sharepoint.com/sites/app-ato
+  libraries:
+    https://contoso.sharepoint.com/sites/app-ato:
+      - Documents
+      - ATO Evidence
   folders:
     https://contoso.sharepoint.com/sites/app-ato:
-      - /Shared Documents/SSP
-      - /Shared Documents/POA&M
-      - /Shared Documents/Policies
+      Documents:
+        - /SSP
+        - /POA&M
+        - /Policies
+      ATO Evidence: []        # entire library
   auth:
     method: device-code
     account_hint: ato-bot@contoso.onmicrosoft.com
+
+onedrive:
+  enabled: true
+  tenant: contoso             # may match sharepoint.tenant
+  users:
+    - alice@contoso.onmicrosoft.com
+    - bob@contoso.onmicrosoft.com
+  folders:
+    alice@contoso.onmicrosoft.com:
+      - /Documents/ATO
+    bob@contoso.onmicrosoft.com: []   # entire /Documents tree
+  auth:
+    method: device-code       # shares the m365 session with sharepoint
 
 aws:
   enabled: true
@@ -754,13 +837,14 @@ Reads an existing package — ideally with `REMEDIATION_GUIDANCE.md` and a recen
 
 ### Just one source (debugging)
 
-The four `ato-source-*` skills are documented as not directly invokable — they expect a scope object from the orchestrator. If you need to verify a source in isolation (e.g. after auth setup), invoke the orchestrator with only that source enabled:
+The five `ato-source-*` skills are documented as not directly invokable — they expect a scope object from the orchestrator. If you need to verify a source in isolation (e.g. after auth setup), invoke the orchestrator with only that source enabled:
 
 ```text
 /ato-artifact-collector --aws
+/ato-artifact-collector --no-repo --onedrive
 ```
 
-That collects only AWS evidence into the package and skips the others.
+The first form collects only AWS evidence (plus the default repo workflow); the second collects only OneDrive evidence and skips the repo entirely.
 
 ---
 
@@ -827,6 +911,22 @@ Edit the relevant `controls/<CF>-…/<cf>-implementation.md` after generation an
 ### "I need to feed the package to a remediation agent"
 
 Run with `--remediation` (or invoke `ato-remediation-guidance` after the fact). The output `REMEDIATION_GUIDANCE.md` is structured as a concrete punch list — each `RG-NNN` carries a control ID, type (CODE/CONFIG/INFRA/TEST/DOC-IN-REPO), exact file path, and acceptance criteria. Hand the file to the remediation agent; the format is designed for that hand-off.
+
+### "OneDrive source returns 403 for half the users"
+
+That's the delegated-access requirement. The OneDrive sibling never requests access; it logs a 403 as a partial failure and continues with the next user. Either grant the logged-in identity delegated access to the affected users' OneDrives (user shares the root folder, or tenant admin grants `Sites.Read.All` to the collection identity), or remove those users from `onedrive.users:` in `.ato-package.yaml`. Partial failures are surfaced in the run summary and in `INDEX.md` so the gap is visible to assessors rather than silently absent.
+
+### "SMB pre-mount probe says 'host unresolved' but the share works in Finder"
+
+The probe uses `dig` / `host` / `getent` for DNS, in that order. If your environment relies on `mDNS` / Bonjour (`.local` names), or NetBIOS name resolution that those tools don't see, the probe degrades to "not checked" rather than blocking the run. The mount itself will then proceed via the OS's normal resolution path. If you want the probe to succeed, expose the host via DNS or pre-resolve it in `/etc/hosts`.
+
+### "I ran with `--no-repo` and the package looks half-empty"
+
+That's expected behavior — `--no-repo` disables the repo discovery, deep code analysis, and vulnerability scan. The narrative documents that depend on code citations (system description, SDLC, vulnerability management plan) will be thinner. Use `--no-repo` only when refreshing the external-evidence portions of an existing package, not as a primary collection mode for a system that has a real codebase.
+
+### "`--no-repo` alone failed with a usage error"
+
+By design. `--no-repo` requires at least one of `--aws`, `--azure`, `--sharepoint`, `--onedrive`, or `--smb` — otherwise there are no sources at all. Add the external source you want collected.
 
 ### "I want to ship the POA&M to a federal authoring tool"
 

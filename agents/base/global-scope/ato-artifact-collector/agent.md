@@ -100,24 +100,84 @@ external scope, Step 2 skips sibling invocation, and `CODE_REFERENCES.md` will h
 every row's `Source` column read `repo`. Repo-only is a first-class mode — there
 is no degradation penalty for using it.
 
+### Running without the repo (`--no-repo`)
+
+The inverse mode is also first-class. When the stub passes `repo.enabled: false`
+in the scope object (set by `--no-repo`), the orchestrator works purely from
+sibling-collected evidence:
+
+- **Step 1.5 (vuln scan): skipped.** The scanner needs a repo. The stub auto-disables
+  vuln scan when `--no-repo` is set, so `vuln_scan.enabled` is already `false` here.
+- **Step 2 (Discover): skipped.** No repo files to walk, no patterns to match. The
+  in-memory "files to collect" and "files for generation" lists are empty for the
+  repo source. Sibling discovery still runs (each enabled sibling walks its own
+  external scope and writes evidence into `docs/ato-package/...`).
+- **Step 3 (Collect): repo branch skipped.** Step 3's repo-file copy loop has nothing
+  to do; the only files in `docs/ato-package/` come from siblings (`sharepoint_*`,
+  `aws_*`, `azure_*`, `smb_*`).
+- **Step 4 (Generate): runs normally.** Narratives are synthesized from
+  sibling-collected evidence; cited rows in `CODE_REFERENCES.md` have `Source` set
+  to the appropriate sibling source token (`sharepoint`, `aws`, `azure`, `smb`,
+  `vulnscan` is absent in this mode). No rows have `Source: repo`.
+- **Step 4.5/4.6 (sub-control enumeration + routing): runs normally.** The
+  per-Determine-If-ID manifests reference whatever sibling-side evidence exists.
+- **Step 5 (Deep Code Analysis): skipped entirely.** The "Auth / Logging / Crypto /
+  Validation / Error / Session" code search is repo-only by definition; without a
+  repo, this step writes nothing and proceeds to Step 6.
+- **Step 6 (Gap Analysis): runs normally.** Gaps are computed against the package
+  structure, not the repo; sibling-only packages reveal a different gap profile
+  (the deep-code-analysis-derived sub-controls show up as "missing implementation
+  evidence" — that's the truth and the package should reflect it).
+- **Step 6.5/6.6/6.7 (assessment + synthesis): run normally**, gated only by
+  `--no-assessment` / `--no-synthesize` as usual. Synthesis cannot rely on
+  reverse-engineering the codebase; it works from the sibling-collected evidence
+  it has.
+- **Steps 7–8 (merge + index): run normally.** The vulnscan citation batch is
+  absent (vuln scan was skipped), so Step 7's merge has one fewer batch to fold
+  in.
+
+`CODE_REFERENCES.md` in `--no-repo` mode has no rows with `Source: repo` and (when
+`--no-vuln-scan` was implied) no rows with `Source: vulnscan`. INDEX.md's banner
+prints "**Source modes**: external-only (--no-repo)" so a reviewer immediately
+knows the package was assembled without code-side evidence.
+
+The `--no-repo` mode is most useful when:
+
+- The repo for a system isn't accessible from the operator's host but the
+  external-source evidence (SharePoint policies, AWS control-plane configs) is.
+- A team is regenerating the external-evidence portions of a package after a
+  policy refresh and doesn't want to re-run the (slow) repo discovery + vuln scan.
+- The system genuinely has no in-house code (e.g. it's a SaaS-only deployment
+  with all configuration in the cloud control plane).
+
+A bare `--no-repo` with no external source flags is rejected at the stub layer
+(see `skills/global-scope/ato-artifact-collector/SKILL.md` Step 0). The orchestrator
+agent should never receive a scope with `repo.enabled: false` AND every external
+source disabled — if it does, log a loud error and exit before Step 1.5.
+
 ### Orchestrating sibling skills
 
-External sources (SharePoint/M365, AWS, Azure, SMB shares) are collected by
-**separate sibling skills**, not by this orchestrator directly. After Step 0 builds
-the scope object, Step 1 orients, and Step 1.5 (if enabled) writes the vulnerability
-baseline, this skill invokes each enabled sibling via the Skill tool, e.g.:
+External sources (SharePoint sites, OneDrive personal sites, AWS, Azure, SMB
+shares) are collected by **separate sibling skills**, not by this
+orchestrator directly. After Step 0 builds the scope object, Step 1 orients,
+and Step 1.5 (if enabled) writes the vulnerability baseline, this skill
+invokes each enabled sibling via the Skill tool, e.g.:
 
-- `skill: "ato-source-sharepoint"` with the resolved sharepoint scope
+- `skill: "ato-source-sharepoint"` with the resolved sharepoint scope (team sites + libraries)
+- `skill: "ato-source-onedrive"` with the resolved onedrive scope (per-user personal sites)
 - `skill: "ato-source-aws"` with the resolved aws scope
 - `skill: "ato-source-azure"` with the resolved azure scope
 - `skill: "ato-source-smb"` with the resolved smb scope
 
-Each sibling is read-only, ambient-auth, and confirms its own scope in-session
-before making any external call. They write evidence files into either
-`docs/ato-package/ssp-sections/{NN}-{slug}/evidence/` or
+SharePoint and OneDrive both speak `m365` but are separate siblings: SharePoint
+scopes are sites + libraries (team-shared), OneDrive scopes are users + folders
+(per-user delegated). The flags `--sharepoint` and `--onedrive` control them
+independently. Each sibling is read-only, ambient-auth, and confirms its own
+scope in-session before making any external call. They write evidence files
+into either `docs/ato-package/ssp-sections/{NN}-{slug}/evidence/` or
 `docs/ato-package/controls/{CF}-{slug}/evidence/{CONTROL-ID}/`, source-prefixed
-(`sharepoint_*`, `aws_*`, `azure_*`, `smb_*`), and a citation batch into
-`docs/ato-package/.staging/{source}-citations.json`. The full contract lives in
+(`sharepoint_*`, `onedrive_*`, `aws_*`, `azure_*`, `smb_*`), and a citation
+batch into `docs/ato-package/.staging/{source}-citations.json`. The full contract lives in
 `references/sibling-contract.md`. Siblings run after Orient (Step 1) and before
 Generate (Step 4), so their evidence is visible to generation. If a sibling fails
 (auth missing, scope rejected), the orchestrator records the failure and continues
@@ -294,6 +354,11 @@ so the package's RA-5 / SI-2 evidence reflects the *current* state of the code.
 
 **Gate**: Skip this step entirely if any of these is true:
 
+- The scope object carries `repo.enabled: false` (set by `--no-repo`). The scanner
+  needs a repo; without one, this step is a no-op. The stub auto-disables vuln
+  scan when `--no-repo` is set, so this gate is normally redundant — but check
+  it anyway in case a config file with `repo.enabled: false` was loaded
+  independently.
 - The scope object carries `vuln_scan.enabled: false` (set when the stub parsed
   `--no-vuln-scan` from the user's invocation).
 - The merged config sets `vulnerability_scan.enabled: false`.
@@ -343,8 +408,15 @@ After the scanner returns, proceed to Step 2.
 
 ## Step 2: Discover
 
-For each of the 20 artifact sections in the guide, search the repository systematically.
-Read `references/artifact-mappings.md` for the detailed mapping of file patterns, code
+**Gate**: If the scope object carries `repo.enabled: false` (set by `--no-repo`),
+skip this step entirely. The "files to collect" and "files for generation" lists
+are empty for the repo source. Sibling discovery (Step 2.x — see "Orchestrating
+sibling skills" above) still runs in parallel because each enabled sibling walks
+its own external scope. Proceed to Step 3 with an empty repo discovery list.
+
+When the repo is enabled (the default): for each of the 20 artifact sections in
+the guide, search the repository systematically. Read
+`references/artifact-mappings.md` for the detailed mapping of file patterns, code
 patterns, and search strategies per section.
 
 **Discovery produces two outputs:**
@@ -395,6 +467,13 @@ IaC:        terraform/, cloudformation/, openshift/
 ```
 
 ## Step 3: Collect
+
+**Gate**: When the scope object carries `repo.enabled: false`, the repo branch
+of this step has nothing to do — Step 2's repo discovery list was empty. Sibling-
+deposited files (`sharepoint_*`, `aws_*`, `azure_*`, `smb_*`) are already in
+place under `docs/ato-package/...` from each sibling's own COPY step; do not
+re-copy them. Proceed to Step 4 with the package as the siblings left it. When
+`repo.enabled` is true (the default), this step runs in full as below.
 
 The output directory has **two top-level branches**: `ssp-sections/` for
 the document-shaped artifacts that an SSP package needs, and `controls/`
@@ -1267,7 +1346,16 @@ After Step 4.6 completes, the package has a complete sub-control directory tree.
 
 ## Step 5: Deep Code Analysis
 
-For each security-relevant code pattern, perform targeted analysis:
+**Gate**: If the scope object carries `repo.enabled: false`, skip this step
+entirely — there is no codebase to analyse. The implementation evidence the
+package would otherwise gain from this step is sourced from siblings (e.g. a
+SharePoint-hosted "Authentication Design" doc covers AC-3 / IA-2; an AWS IAM
+role export covers AC-2; an Azure NSG rule covers SC-7). Step 6 (Gap Analysis)
+will surface any remaining sub-controls that lacked evidence — that's the
+intended signal in `--no-repo` mode.
+
+When the repo is enabled (the default): for each security-relevant code pattern,
+perform targeted analysis:
 
 ### Authentication & Authorization
 - Find all auth middleware/filters and document the enforcement chain
