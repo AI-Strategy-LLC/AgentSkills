@@ -39,6 +39,7 @@ A paired stub and agent live in matching scopes — if the stub is global, the a
 | Gemini CLI | `~/.gemini/agents/` | `~/.agents/skills/` (shared) | `<repo>/.gemini/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Pi (pi.dev) | — *(no subagents)* | `~/.agents/skills/` (shared) | `<repo>/.pi/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
 | Cursor | `~/.cursor/agents/` | `~/.agents/skills/` (shared) | `<repo>/.cursor/` | `<name>.mdc` (MDC + YAML) | filename |
+| Crush | — *(no subagents)* | `~/.config/agents/skills/` (XDG-shared) | `<repo>/.crush/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
 
 The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept a multi-CLI selection. The user chooses which CLIs to install for; each selected CLI gets its own correctly-shaped copy of every agent (where applicable — Pi has only skills).
 
@@ -46,9 +47,17 @@ The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept
 
 **Native Windows support.** `install.ps1` (and `ato/install.ps1`) are PowerShell wrappers that detect Git Bash, offer to install Git for Windows via `winget` (or Chocolatey, or a manual download fallback), and forward args to the bash installers. Git Bash provides bash + curl + tar + the rest of the POSIX toolset the installer needs, and handles the Windows-path translation transparently. CLI directories follow the same `~/.<cli>/` convention — `~` resolves to `%USERPROFILE%` (e.g. `C:\Users\<name>\.claude\`).
 
-**Skill placement (strategy A — single canonical location, lean on cross-scan):** OpenCode, Kilo, Gemini, Codex, and Pi all auto-discover `~/.agents/skills/` as a cross-CLI compatibility location, so `install.sh` writes skills there once and lets those five CLIs pick them up. Claude is the only CLI that doesn't scan `~/.agents/`, so it gets its own `~/.claude/skills/`. Result: **at most two physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
+**Skill placement (strategy A — single canonical location per scan-group, lean on cross-scan):** Three dedup buckets exist:
+
+- `~/.claude/skills/` — Claude Code only (it doesn't scan the cross-CLI paths).
+- `~/.agents/skills/` — OpenCode, Kilo, Gemini, Codex, Pi, Cursor (HOME-dot-prefixed cross-CLI compat path).
+- `~/.config/agents/skills/` — Crush (XDG-rooted cross-CLI path per Crush's `GlobalSkillsDirs()`; Crush does not scan `~/.agents/skills/`).
+
+`install.sh` writes each unique skills directory exactly once per install. Result: **at most three physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
 
 **Pi has no subagents.** Pi (pi.dev) is a "minimal terminal coding harness" whose only customization mechanism is skills (loaded from `~/.pi/agent/skills/` and `~/.agents/skills/`). It has no Agent tool, no `subagent_type`, no equivalent to `~/.claude/agents/`. The installer skips agent rendering entirely for Pi (`cli_has_agents pi` returns false; `install_cli pi` short-circuits after the skills-dedup step). **Caveat:** thin-stub skills like `branch-review`, `deep-review`, `bdd-audit`, and `ato-artifact-collector` will surface in Pi (they're skills) but their bodies say "invoke the Agent tool with `subagent_type: <agent-name>`" — which Pi cannot do. Pi users who trigger one of those stubs will get a clear runtime error from Pi's harness; consider this a known limitation, not a bug. Skills that do their work inline (`coverage-audit`, `repo-health`, `auth-config`, `auth-interview`, the language preflights, etc.) work normally in Pi.
+
+**Crush has no subagents either.** Crush (`charmbracelet/crush`) is skills-only from this installer's perspective: its `Agent` type is a JSON struct defined inline in `crush.json` under the `agents` key, with no equivalent of `~/.claude/agents/<name>.md` file-based subagents. Skills come from `$CRUSH_SKILLS_DIR`, `~/.config/crush/skills/`, `~/.config/agents/skills/`, and the project-local `.crush/skills`, `.agents/skills`, `.claude/skills`, `.cursor/skills`. The installer writes once to `~/.config/agents/skills/` (the cross-CLI XDG path) and `cli_has_agents crush` returns false. Same thin-stub caveat as Pi applies — skills whose bodies call the Agent tool will fail at runtime in Crush.
 
 **Flat-only agent shape for OpenCode / Kilo / Gemini.** Those three CLIs recursively scan their `agents/` directory and register every `.md` file as an agent — including bundled `references/*.md`, which then surface as broken namespaced agents. To avoid that, the renderers for those CLIs **inline bundled references into the agent body** (via `_lib.sh::inline_references`) and the installer always writes them as flat `<name>.md` files. Claude and Codex preserve directory form because they don't have the same scanning trap.
 

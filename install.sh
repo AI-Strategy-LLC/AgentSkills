@@ -82,7 +82,7 @@ CP_EXPLICIT=0                                          # user passed at least on
 
 MANIFEST_NAME="installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor"
+SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor crush"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -101,6 +101,7 @@ Required:
                         gemini     → ~/.gemini/
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
+                        crush      → ~/.config/crush/ (skills only — Crush agents live in crush.json)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
                       mode (e.g. pipe into sh -c) --for is required.
 
@@ -213,6 +214,7 @@ cli_root() {
         gemini)   printf '%s/.gemini' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
+        crush)    printf '%s/crush' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
         *) die "unknown CLI: $cli" ;;
     esac
 }
@@ -225,8 +227,8 @@ cli_root() {
 # to ~/.claude/agents/.
 cli_has_agents() {
     case "$1" in
-        pi) return 1 ;;
-        *)  return 0 ;;
+        pi|crush) return 1 ;;
+        *)        return 0 ;;
     esac
 }
 
@@ -259,6 +261,11 @@ cli_skills_dir() {
     case "$cli" in
         claude)                                 bucket=".claude/skills" ;;
         opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        # Crush scans $XDG_CONFIG_HOME/agents/skills (XDG-rooted) rather than
+        # $HOME/.agents/skills (HOME-dot-prefixed) that the other CLIs use, so
+        # it gets a distinct third dedup bucket. Source:
+        # charmbracelet/crush internal/config/load.go GlobalSkillsDirs().
+        crush)                                  bucket=".config/agents/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then
@@ -297,8 +304,9 @@ prompt_for_clis() {
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/"
-        echo "  6) pi        → ~/.pi/agent/   (skills only)"
-        echo "  7) cursor    → ~/.cursor/     (rules-as-MDC)"
+        echo "  6) pi        → ~/.pi/agent/    (skills only)"
+        echo "  7) cursor    → ~/.cursor/      (rules-as-MDC)"
+        echo "  8) crush     → ~/.config/crush/ (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -316,7 +324,8 @@ prompt_for_clis() {
             5) mapped="${mapped:+$mapped,}gemini" ;;
             6) mapped="${mapped:+$mapped,}pi" ;;
             7) mapped="${mapped:+$mapped,}cursor" ;;
-            claude|opencode|kilo|codex|gemini|pi|cursor) mapped="${mapped:+$mapped,}$t" ;;
+            8) mapped="${mapped:+$mapped,}crush" ;;
+            claude|opencode|kilo|codex|gemini|pi|cursor|crush) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
