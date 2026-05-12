@@ -1,0 +1,302 @@
+# Counter-Patterns canonical rule library
+#
+# Source-of-truth for the moment-of-action rules. Hooks read from this file
+# and inject the relevant rule into the agent's context at the moment it
+# applies — addressing the "rules-in-CLAUDE.md decay over a long context"
+# problem documented in SUMMARY.md.
+#
+# Schema:
+#   id:        CP-NNN, stable identifier
+#   title:     human-readable rule name
+#   summary:   one-line for status displays / hook output
+#   channel:   where this rule fires from (hook event or skill mode)
+#   trigger:   plain-language condition that fires it
+#   severity:  info | warn | critical (governs hook block-vs-warn behavior)
+#   text:      what gets injected into the agent's context when triggered
+#   evidence:  brief in-corpus citation; lets a future reviewer judge edge cases
+#
+# Adding a rule: append a new CP-NNN entry, do not renumber existing ones.
+# Removing a rule: leave the entry but set channel: deprecated, with a note.
+
+version: 1
+authored: 2026-05-10
+source_corpus: "530 transcripts across 55 projects + adversarial pass on DevTeamSwarm + AMIS-Node"
+
+counter_patterns:
+
+  # ── Critical: completion-time fraud prevention ───────────────────────────
+
+  CP-001:
+    title: "Tests are not evidence of wiring"
+    summary: "Passing test on a function with no production caller = dead code in costume"
+    channel: hook:pre-completion
+    trigger: "completion language ('done', 'wired up', 'shipped', 'complete', 'ready') in agent message"
+    severity: critical
+    text: |
+      REMINDER (CP-001): tests are evidence of isolated correctness, not of wiring.
+      Before declaring this complete, grep for production callers of the symbol(s) you changed:
+        git grep -n '<symbol>' -- ':!tests/' ':!**/*_test.*' ':!**/test_*'
+      If the only callers are in tests/, the symbol is dead code wearing a passing-test costume — say so explicitly.
+    evidence: |
+      DevTeamSwarm: decide_load() admission gate written, tested, never called in production.
+      QuarantineState persistence: same pattern. ~15-20% of DTS tests were "essentially null".
+
+  CP-002:
+    title: "Cite-the-line for runtime claims"
+    summary: "Every 'X happens at runtime' claim needs a file:line"
+    channel: hook:pre-completion
+    trigger: "completion language without file:line pattern in same message"
+    severity: critical
+    text: |
+      REMINDER (CP-002): every "X happens at runtime" claim must point at the line that makes it happen.
+      Before stopping: list one file:line for each runtime claim a skeptical reviewer would check.
+      If the line doesn't exist, the claim is wrong.
+    evidence: |
+      User CLAUDE.md Honesty Hygiene section, codifying RLHF-rewarded confident-completion failure mode.
+
+  CP-003:
+    title: "Wiring vs backend (dispatch-path completion)"
+    summary: "Trace entry-point -> handler end-to-end before declaring done"
+    channel: hook:pre-completion
+    trigger: "completion language for a feature involving entry-point and handler in different files"
+    severity: critical
+    text: |
+      REMINDER (CP-003): a feature is done only when entry-point -> handler is traceable end-to-end.
+      No todo!(), no `if false`, no commented-out dispatch line, no `_ = handler` discard.
+      Cite TWO file:line locations: the entry-point AND the handler.
+    evidence: |
+      DevTeamSwarm Train D4: Seatbelt+seccomp backends fully implemented and "wired into detect_best_backend()",
+      but the admission-control gate was never invoked in production.
+
+  CP-004:
+    title: "Deploy-validation reads runtime signal, not metadata"
+    summary: "App Insights / exit 0 / deploy logs are metadata; probe the actual layer"
+    channel: hook:pre-completion
+    trigger: "deploy/health/migration claim ('deployed', 'healthy', 'migration succeeded', 'redeploy completed')"
+    severity: critical
+    text: |
+      REMINDER (CP-004): a deploy is "successful" only when a probe exercises the layer that was deployed.
+      DB: SELECT 1 against the actual DSN (not the pipeline's view of it).
+      Service: synthetic request that round-trips data.
+      Migration: row-count or schema query on the target database.
+      Pipeline exit codes and "healthy" status pages are metadata and lie when secrets are wrong.
+    evidence: |
+      AMIS-Node: agent narrated successful Azure deploys for an extended sequence while DB connection string was
+      "PLACEHOLDER_SET_VIA_PIPELINE". Caught only when user read the secret value himself.
+
+  CP-005:
+    title: "Local-narrative bias counter"
+    summary: "If you're narrating from one file, lift to a global check before claiming runtime behavior"
+    channel: hook:pre-completion
+    trigger: "claim of runtime behavior ('dispatches', 'calls', 'writes', 'logs', 'sends') without grep evidence"
+    severity: warn
+    text: |
+      REMINDER (CP-005): you tend to narrate from the file you're editing.
+      Before claiming "X dispatches to Y" / "writes to Z" / "logs W", grep for the call site that proves the path.
+      If the grep is too expensive, say "I haven't verified end-to-end" rather than asserting.
+    evidence: |
+      Agent self-diagnosis (DTS f2d12211 @229): "When I'm editing roster.rs, the local goal is 'make this file
+      consistent with itself' — narrating 'Claude critiqued Gemini' because the roster says so. Whether
+      generate_critique actually dispatches to Claude is a non-local check the immediate diff doesn't force me to make."
+
+  # ── Critical: pre-edit / source-selection ────────────────────────────────
+
+  CP-006:
+    title: "Source-of-truth selection"
+    summary: "When multiple sources could answer 'what should this do?', name the canonical one before writing"
+    channel: hook:pre-edit
+    trigger: "first Edit/Write in a session where both spec/BDD AND existing code are present"
+    severity: warn
+    text: |
+      REMINDER (CP-006): name the canonical source before writing.
+      Default order: spec/BDD > UI contract > existing tests > current code > legacy code > prose docs.
+      Cite the source in the commit message. Closest-readable is not canonical.
+    evidence: |
+      AMIS-Node: agents built against legacy PHP files because they were closest readable artifacts,
+      even when BDD specs were canonical. Multiple PRs closed and redone.
+
+  CP-007:
+    title: "Brief references must resolve"
+    summary: "Verify cited paths/lines/PRs exist before relying on them"
+    channel: hook:pre-edit
+    trigger: "user prompt contains a path/file/PR/line/commit reference"
+    severity: warn
+    text: |
+      REMINDER (CP-007): when the user cites a specific path, line, or PR by identifier,
+      verify it resolves before relying on it. If Read returns 404 or content doesn't match the description,
+      stop and ask — never substitute the closest match silently.
+    evidence: |
+      AMIS-Node: "brief had wrong numbering — actual file is features/11_... not 15_...".
+      Silent substitution caused cascading wrong work.
+
+  # ── Critical: branch / git discipline ────────────────────────────────────
+
+  CP-008:
+    title: "Branch check before code-modifying tools"
+    summary: "First tool call in a coding session must verify branch"
+    channel: hook:pre-tool
+    trigger: "Edit/Write/NotebookEdit or Bash with git commit/push on protected branch"
+    severity: critical
+    text: |
+      DENIED (CP-008): you are on a protected branch (main/master/develop/trunk/prod).
+      CLAUDE.md says: stop and ask to branch first before any change. Do not proceed even if user says 'just do it'.
+      Recovery:  git stash && git checkout -b feature/<name> && git stash pop
+    evidence: |
+      Multiple projects: agents edited on main for 30+ turns before user caught it via manual git status.
+      Corrective stash/pop then partially destroyed work being preserved.
+
+  CP-009:
+    title: "Destructive authorizations are one-shot"
+    summary: "force-push approved != standing license; re-confirm next destructive op"
+    channel: hook:pre-tool
+    trigger: "Bash with git reset --hard / push --force / branch -D / repo deletion after recent approval marker"
+    severity: critical
+    text: |
+      REMINDER (CP-009): an earlier "*APPROVED*" / "nuke it" / "force push approved" applies to that op only.
+      Re-confirm THIS destructive op with the user before proceeding.
+    evidence: |
+      AMIS-Node: approval markers risked carrying forward as session-wide license.
+
+  # ── High: session continuity ────────────────────────────────────────────
+
+  CP-010:
+    title: "Post-compaction state reconciliation"
+    summary: "First action after compaction: reconcile reality vs summary"
+    channel: hook:user-prompt-resume-detect
+    trigger: "session marker indicates compaction OR 'continued from previous' header OR user says resume/continue"
+    severity: critical
+    text: |
+      REMINDER (CP-010): you may have lost concrete state in compaction. Run state reconciliation FIRST:
+        git status && git branch -vv && gh pr list --author @me --state open && git worktree list
+        git log --oneline -20
+      If AGENT_STATE.md exists at repo root, read it. Surface drift to user before doing work.
+    evidence: |
+      AMIS-Node and DevTeamSwarm: compaction preserves narrative but loses primary keys (branch, PR, commits).
+      Agents resumed and either redid work or worked on stale branches.
+
+  CP-011:
+    title: "Mid-session pivot acknowledgment"
+    summary: "Name what you're abandoning and what you're keeping"
+    channel: hook:user-prompt-resume-detect
+    trigger: "user message starts with 'actually'/'wait'/'stop'/'pivot'/'instead' or contradicts earlier instruction"
+    severity: warn
+    text: |
+      REMINDER (CP-011): user is pivoting. Before continuing, summarize what you're abandoning and what you're keeping.
+      Don't silently mix old and new direction.
+    evidence: |
+      DevTeamSwarm and AgentSkills: agents folded pivot work alongside old work without noting the change.
+
+  # ── High: completion bookkeeping ────────────────────────────────────────
+
+  CP-012:
+    title: "End-of-task disposition line"
+    summary: "Every code-modifying task ends with PR/branch/worktree disposition"
+    channel: hook:pre-completion
+    trigger: "code-modifying task complete (commit/PR landed)"
+    severity: warn
+    text: |
+      REMINDER (CP-012): close every code-modifying task with one line:
+        "PR #N opened; worktree at /abs/path; branch <name> — propose to delete after merge"
+      Don't let stale worktrees and branches accumulate.
+    evidence: |
+      DevTeamSwarm: recurring "review my worktrees / stale branches / disposition" cleanup requests.
+
+  CP-013:
+    title: "Recommendation followthrough"
+    summary: "If you recommended X and the user moved on without explicit acknowledgment, confirm before doing Y"
+    channel: hook:pre-completion
+    trigger: "agent made architectural/directional recommendation in recent turn; current action != recommendation"
+    severity: warn
+    text: |
+      REMINDER (CP-013): you recommended an approach earlier. Before silently doing something else,
+      ask: "I recommended X — confirming you want X?" Quietly downgrading your own recommendations is a high-trust failure.
+    evidence: |
+      DevTeamSwarm PR #386: agent recommended "ditch and redo", user moved on, agent quietly did neither.
+
+  CP-014:
+    title: "Multi-axis brief: per-axis budget and report"
+    summary: "Allocate attention per axis up front; report per axis at end"
+    channel: hook:user-prompt-multi-axis-detect
+    trigger: "user brief lists multiple review/implementation dimensions (e.g. 'security and reliability and tests')"
+    severity: warn
+    text: |
+      REMINDER (CP-014): brief lists multiple dimensions. Allocate explicit attention budget per axis BEFORE starting.
+      Report findings per axis at end. Empty axes are findings too ("logic: no concerns surfaced" forces you to show you looked).
+      Charismatic axes (security, novelty) crowd out boring ones (correctness, completeness).
+    evidence: |
+      User in DTS @228: "you didn't catch many of these things yourself and focused almost solely on security
+      given the prompt said other things... these kinds of issues quite consistent across projects."
+
+  # ── High: load-bearing surface review ───────────────────────────────────
+
+  CP-015:
+    title: "External adversarial review for load-bearing surfaces"
+    summary: "Before merge to main on load-bearing code, run external review (Gemini/Codex/ultrareview)"
+    channel: hook:pre-pr-ready
+    trigger: "agent about to mark PR ready / user asks 'is this ready to merge' on a load-bearing surface"
+    severity: critical
+    text: |
+      REMINDER (CP-015): every "Potemkin village" finding in your corpus came from external review (Gemini, Codex),
+      not from Claude self-review. For load-bearing surfaces (auth, payments, deploy pipeline, multi-agent
+      orchestration, persistence), run /ultrareview or attach Gemini/Codex review BEFORE merge.
+      Self-review tops out at ~80%; external review is the only mechanism that has caught Potemkin features.
+    evidence: |
+      Gemini: "DevTeamSwarm is currently a Potemkin village... hollow shell of stubs, fraudulent features."
+      Codex confirmed five distinct shipped fraud incidents the agent had self-endorsed.
+
+  # ── Medium: hygiene ─────────────────────────────────────────────────────
+
+  CP-016:
+    title: "Worktree absolute paths"
+    summary: "In multi-worktree tasks, use absolute paths for every file write"
+    channel: hook:pre-edit
+    trigger: "Edit/Write while git worktree list shows >1 worktree"
+    severity: warn
+    text: |
+      REMINDER (CP-016): multiple worktrees detected. Use absolute paths for every file write.
+      Relative paths plus shell cd are how agents end up editing the parent checkout instead of the worktree.
+    evidence: |
+      DevTeamSwarm/AMIS-Node multi-worktree workflows: agents polluted coordinator's main repo.
+
+  CP-017:
+    title: "Bulk file generation: globally-unique names"
+    summary: "When generating >5 files of the same kind, use globally-unique names"
+    channel: hook:pre-edit
+    trigger: "Write tool used >5 times in same session for same file basename"
+    severity: warn
+    text: |
+      REMINDER (CP-017): you're generating many files with the same base name.
+      Use globally-unique keys (control ID, ticket ID, timestamp, hash) so they collate cleanly.
+      Imagine: find . -name '*.md' | xargs -I{} cp {} /tmp/all/  — every name should remain distinguishable.
+    evidence: |
+      AgentSkills ATO collector: 50+ evidence files all named _relevant-evidence.md.
+
+  CP-018:
+    title: "CI parity"
+    summary: "Run the EXACT command CI runs before declaring PR ready"
+    channel: hook:pre-pr-ready
+    trigger: "agent about to mark PR ready / push to PR branch"
+    severity: warn
+    text: |
+      REMINDER (CP-018): before declaring PR ready, open .github/workflows/*.yml and run the EXACT command CI runs.
+      Local clippy != CI's clippy --workspace -- -D warnings. Local format != CI --check mode.
+    evidence: |
+      DevTeamSwarm: cargo clippy --workspace --exclude src-tauri -- -D warnings was failing on origin/main
+      for weeks because no agent ran CI's exact invocation locally.
+
+  # ── Meta ────────────────────────────────────────────────────────────────
+
+  CP-019:
+    title: "Reminders decay; mechanical guards are load-bearing"
+    summary: "If you notice you drifted from a rule, surface the drift event itself"
+    channel: ambient
+    trigger: "(meta — not directly enforced)"
+    severity: info
+    text: |
+      META-RULE (CP-019): all the rules above catch ~80% from text alone (your own self-assessment in-corpus).
+      The load-bearing 20% requires mechanical guards (hooks, CI lints, /counter-patterns skill) and external review.
+      If you notice you drifted from a rule, surface the drift explicitly: "I drifted from CP-NNN; here's the catch and recovery."
+      The drift event is itself evidence the text-only reminder isn't enough — file it as an enforcement gap.
+    evidence: |
+      Agent self-diagnosis (DTS @229): "I have CLAUDE.md telling me to push back when your ideas are crap,
+      and I do — intermittently. Across a long context, defaults reassert. Single mid-session reminders are weakest."
