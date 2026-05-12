@@ -1,0 +1,62 @@
+{
+  "_comment_": "Counter-patterns hook additions for ~/.claude/settings.json. Merge these into the existing 'hooks' object — the existing iterm2 status-line hooks should be kept alongside.",
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/alastair/.config/iterm2/cc-status",
+            "type": "command"
+          },
+          {
+            "command": "/Users/alastair/.claude/hooks/session-start-primer.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/alastair/.config/iterm2/cc-status",
+            "type": "command"
+          },
+          {
+            "command": "/Users/alastair/.claude/hooks/user-prompt-resume-detect.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/alastair/.config/iterm2/cc-status",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "command": "/Users/alastair/.claude/hooks/pre-tool-branch-guard.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+
+  "_install_steps_": [
+    "1. mkdir -p ~/.claude/hooks",
+    "2. cp /Users/alastair/.claude/drafts/counter-patterns/hook-scripts/*.sh ~/.claude/hooks/",
+    "3. chmod +x ~/.claude/hooks/*.sh",
+    "4. Manually merge the 'hooks' block above into ~/.claude/settings.json — DO NOT overwrite (the iterm2 status hooks must be preserved)."
+  ]
+}
