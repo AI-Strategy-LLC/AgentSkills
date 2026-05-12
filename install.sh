@@ -28,12 +28,28 @@
 #   4. Re-runs are idempotent: new/updated artifacts replace, removed-from-source
 #      artifacts are pruned, user-authored artifacts are never touched.
 #
+# Opt-in extras (default off — preserves the "don't touch user files outside
+# the CLI agent/skill dirs" invariant unless the user explicitly opts in):
+#   --counter-patterns-block prepend|append   Insert a marker-delimited
+#                                             counter-patterns block into the
+#                                             user's CLAUDE.md. Reversible.
+#   --counter-patterns-block-target <path>    Override CLAUDE.md target.
+#                                             Default: ~/.claude/CLAUDE.md
+#   --counter-patterns-hooks                  Install Claude Code hook scripts
+#                                             that enforce the counter-patterns
+#                                             rules at the moment of action.
+#                                             Requires `claude` in --for.
+#
 # What it does NOT do:
 #   - Install repo-scope artifacts (those land per-repo via the skill-sync skill).
-#   - Modify shell configs or any user file outside the CLI agent/skill dirs —
-#     with one exception: if --for is exactly "kilo", the installer will write
-#     a defensive setting into Kilo's own config to disable scanning of other
-#     CLIs' agent directories. See the "Kilo defensive" section below.
+#   - Modify shell configs or any user file outside the CLI agent/skill dirs
+#     UNLESS the user opts in via one of the counter-patterns extras flags
+#     above. Two narrower exceptions remain on by default: if --for is exactly
+#     "kilo", the installer writes a defensive setting into Kilo's own config
+#     to disable cross-scanning. See "Kilo defensive" below.
+#   - Edit ~/.claude/settings.json. The counter-patterns hooks installer prints
+#     a JSON snippet for the user to merge by hand — JSON-merge across
+#     hand-authored settings is risky to automate.
 #   - Store credentials. For that, run the auth-interview skill after install.
 
 set -euo pipefail
@@ -57,9 +73,16 @@ ACTION="install"
 ASSUME_YES=0
 KEEP_CACHE=""
 
+# Counter-patterns extras (opt-in). Set via flags or the interactive prompt.
+CP_BLOCK_MODE=""                                       # "" | "prepend" | "append"
+CP_BLOCK_TARGET=""                                     # default resolved to ~/.claude/CLAUDE.md
+CP_HOOKS_INSTALL=0                                     # 0 | 1
+CP_HOOKS_TARGET=""                                     # default resolved to ~/.claude/hooks
+CP_EXPLICIT=0                                          # user passed at least one --counter-patterns-* flag
+
 MANIFEST_NAME="installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor"
+SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor crush"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -78,6 +101,7 @@ Required:
                         gemini     → ~/.gemini/
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
+                        crush      → ~/.config/crush/ (skills only — Crush agents live in crush.json)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
                       mode (e.g. pipe into sh -c) --for is required.
 
@@ -96,6 +120,21 @@ Options:
   -y, --yes           Do not prompt; assume yes.
   -h, --help          This message.
 
+Counter-patterns extras (opt-in; default off):
+  --counter-patterns-block <mode>
+                      Insert the counter-patterns block into a CLAUDE.md.
+                      Mode is 'prepend' or 'append'. The block is marker-
+                      delimited and reversible (via --uninstall or the
+                      bundled install-claude-md-block.sh remove helper).
+  --counter-patterns-block-target <path>
+                      Override the CLAUDE.md target.
+                      Default: ~/.claude/CLAUDE.md
+  --counter-patterns-hooks
+                      Install Claude Code hook scripts under ~/.claude/hooks/
+                      and print a settings.json snippet to merge. Requires
+                      'claude' in --for. The installer does NOT edit
+                      settings.json automatically.
+
 Environment variables:
   AGENT_SKILLS_REPO, AGENT_SKILLS_REF, AGENT_SKILLS_DEST, AGENT_SKILLS_FOR
 EOF
@@ -112,6 +151,21 @@ while [ $# -gt 0 ]; do
         --list) ACTION="list"; shift ;;
         --uninstall) ACTION="uninstall"; shift ;;
         --keep-cache) KEEP_CACHE="$2"; shift 2 ;;
+        --counter-patterns-block)
+            case "${2:-}" in
+                prepend|append) CP_BLOCK_MODE="$2" ;;
+                *) echo "--counter-patterns-block: mode must be 'prepend' or 'append', got '${2:-}'" >&2; exit 2 ;;
+            esac
+            CP_EXPLICIT=1
+            shift 2 ;;
+        --counter-patterns-block-target)
+            CP_BLOCK_TARGET="$2"
+            CP_EXPLICIT=1
+            shift 2 ;;
+        --counter-patterns-hooks)
+            CP_HOOKS_INSTALL=1
+            CP_EXPLICIT=1
+            shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -160,6 +214,7 @@ cli_root() {
         gemini)   printf '%s/.gemini' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
+        crush)    printf '%s/crush' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
         *) die "unknown CLI: $cli" ;;
     esac
 }
@@ -172,8 +227,8 @@ cli_root() {
 # to ~/.claude/agents/.
 cli_has_agents() {
     case "$1" in
-        pi) return 1 ;;
-        *)  return 0 ;;
+        pi|crush) return 1 ;;
+        *)        return 0 ;;
     esac
 }
 
@@ -206,6 +261,11 @@ cli_skills_dir() {
     case "$cli" in
         claude)                                 bucket=".claude/skills" ;;
         opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        # Crush scans $XDG_CONFIG_HOME/agents/skills (XDG-rooted) rather than
+        # $HOME/.agents/skills (HOME-dot-prefixed) that the other CLIs use, so
+        # it gets a distinct third dedup bucket. Source:
+        # charmbracelet/crush internal/config/load.go GlobalSkillsDirs().
+        crush)                                  bucket=".config/agents/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then
@@ -244,8 +304,9 @@ prompt_for_clis() {
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/"
-        echo "  6) pi        → ~/.pi/agent/   (skills only)"
-        echo "  7) cursor    → ~/.cursor/     (rules-as-MDC)"
+        echo "  6) pi        → ~/.pi/agent/    (skills only)"
+        echo "  7) cursor    → ~/.cursor/      (rules-as-MDC)"
+        echo "  8) crush     → ~/.config/crush/ (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -263,7 +324,8 @@ prompt_for_clis() {
             5) mapped="${mapped:+$mapped,}gemini" ;;
             6) mapped="${mapped:+$mapped,}pi" ;;
             7) mapped="${mapped:+$mapped,}cursor" ;;
-            claude|opencode|kilo|codex|gemini|pi|cursor) mapped="${mapped:+$mapped,}$t" ;;
+            8) mapped="${mapped:+$mapped,}crush" ;;
+            claude|opencode|kilo|codex|gemini|pi|cursor|crush) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
@@ -463,6 +525,17 @@ list_install_set() {
 
     # Note: opencode/kilo/gemini share ~/.agents/skills/ — listed per CLI
     # above for clarity, but install.sh writes that directory only once.
+
+    if [ -n "$CP_BLOCK_MODE" ] || [ "$CP_HOOKS_INSTALL" = 1 ]; then
+        echo
+        echo "--- counter-patterns extras ---"
+        if [ -n "$CP_BLOCK_MODE" ]; then
+            echo "  CLAUDE.md block ($CP_BLOCK_MODE) → ${CP_BLOCK_TARGET:-$(cp_default_block_target)}"
+        fi
+        if [ "$CP_HOOKS_INSTALL" = 1 ]; then
+            echo "  hooks → ${CP_HOOKS_TARGET:-$(cp_default_hooks_target)}"
+        fi
+    fi
 }
 
 # ---- install one CLI ------------------------------------------------------
@@ -636,16 +709,45 @@ write_manifest() {
         blocks="$blocks    }$trailing_comma\n"
     done
 
+    # Counter-patterns extras block. Omit groups that aren't installed so
+    # uninstall can use presence-of-target as the "should remove" signal.
+    local extras_block=""
+    if [ "$CP_BLOCK_INSTALLED" = 1 ] || [ "$CP_HOOKS_INSTALLED" = 1 ]; then
+        extras_block="  \"extras\": {\n"
+        if [ "$CP_BLOCK_INSTALLED" = 1 ]; then
+            extras_block="$extras_block    \"counter_patterns_block\": {\n"
+            extras_block="$extras_block      \"target\": \"$(json_escape "$CP_BLOCK_INSTALLED_TARGET")\",\n"
+            extras_block="$extras_block      \"mode\": \"$(json_escape "$CP_BLOCK_INSTALLED_MODE")\"\n"
+            if [ "$CP_HOOKS_INSTALLED" = 1 ]; then
+                extras_block="$extras_block    },\n"
+            else
+                extras_block="$extras_block    }\n"
+            fi
+        fi
+        if [ "$CP_HOOKS_INSTALLED" = 1 ]; then
+            extras_block="$extras_block    \"counter_patterns_hooks\": {\n"
+            extras_block="$extras_block      \"hooks_dir\": \"$(json_escape "$CP_HOOKS_INSTALLED_DIR")\",\n"
+            extras_block="$extras_block      \"scripts\": [\n"
+            extras_block="$extras_block        \"pre-completion.sh\",\n"
+            extras_block="$extras_block        \"pre-tool-branch-guard.sh\",\n"
+            extras_block="$extras_block        \"session-start-primer.sh\",\n"
+            extras_block="$extras_block        \"user-prompt-resume-detect.sh\"\n"
+            extras_block="$extras_block      ]\n"
+            extras_block="$extras_block    }\n"
+        fi
+        extras_block="$extras_block  },\n"
+    fi
+
     {
         printf '{\n'
-        printf '  "version": 3,\n'
+        printf '  "version": 4,\n'
         printf '  "source": {\n'
         printf '    "repo": "%s",\n' "$(json_escape "$REPO")"
         printf '    "ref": "%s",\n' "$(json_escape "$REF")"
         printf '    "resolved_sha": "%s"\n' "$(json_escape "$resolved_sha")"
         printf '  },\n'
         printf '  "installed_at": "%s",\n' "$(iso_now)"
-        printf '  "installer_version": 3,\n'
+        printf '  "installer_version": 4,\n'
         printf '  "clis": ['
         local first=1
         for cli in $CLIS; do
@@ -653,6 +755,7 @@ write_manifest() {
             printf '"%s"' "$cli"
         done
         printf '],\n'
+        printf '%b' "$extras_block"
         printf '  "installed": {\n'
         printf '%b' "$blocks"
         printf '  }\n'
@@ -806,6 +909,31 @@ uninstall() {
         [ "$cli" = codex ] && rm -f "$root/AGENTS.md"
     done
 
+    # Counter-patterns extras: only undo when we're tearing down everything,
+    # OR when claude was in the --for set (the extras only ever attached to
+    # the claude CLI). Otherwise leave them — partial CLI uninstalls
+    # shouldn't strip the user's CLAUDE.md or hooks.
+    local undo_extras=0
+    if [ -z "$FOR_LIST" ]; then
+        undo_extras=1
+    else
+        case " $target_clis " in *" claude "*) undo_extras=1 ;; esac
+    fi
+    if [ "$undo_extras" = 1 ]; then
+        local cp_block_target cp_hooks_dir
+        cp_block_target=$(manifest_extras_scalar "$mpath" counter_patterns_block target)
+        cp_hooks_dir=$(manifest_extras_scalar "$mpath" counter_patterns_hooks hooks_dir)
+        if [ -n "$cp_block_target" ] && [ -f "$cp_block_target" ]; then
+            echo "  • removing counter-patterns CLAUDE.md block from $cp_block_target"
+            cp_block_remove_inline "$cp_block_target"
+        fi
+        if [ -n "$cp_hooks_dir" ] && [ -d "$cp_hooks_dir" ]; then
+            echo "  • removing counter-patterns hooks from $cp_hooks_dir"
+            cp_hooks_uninstall_inline "$cp_hooks_dir"
+            echo "    (also remove the counter-patterns entries from ~/.claude/settings.json by hand)"
+        fi
+    fi
+
     # If uninstalling everything, delete the manifest. Otherwise rewrite it
     # with the remaining CLIs.
     if [ -z "$FOR_LIST" ]; then
@@ -818,6 +946,165 @@ uninstall() {
         echo "Note: manifest still lists uninstalled CLIs. Re-run install to regenerate."
     fi
     echo "Removed."
+}
+
+# ---- counter-patterns extras ---------------------------------------------
+# Opt-in installers for the counter-patterns CLAUDE.md block and Claude Code
+# hooks. Both are no-ops unless the user explicitly opts in via flags or the
+# interactive prompt. Both record their state in the manifest so --uninstall
+# can reverse them.
+
+cp_default_block_target() {
+    if [ -n "$DEST" ]; then
+        printf '%s/CLAUDE.md' "$DEST"
+    else
+        printf '%s/.claude/CLAUDE.md' "$HOME"
+    fi
+}
+
+cp_default_hooks_target() {
+    if [ -n "$DEST" ]; then
+        printf '%s/.claude/hooks' "$DEST"
+    else
+        printf '%s/.claude/hooks' "$HOME"
+    fi
+}
+
+# Prompt the user about counter-patterns extras if (a) claude is selected,
+# (b) no extras flags were set, and (c) we have a TTY. Sets CP_BLOCK_MODE and
+# CP_HOOKS_INSTALL based on responses.
+cp_prompt_for_extras() {
+    case " $CLIS " in *" claude "*) ;; *) return 0 ;; esac
+    [ "$CP_EXPLICIT" = 1 ] && return 0
+    local tty="/dev/tty"
+    [ -r "$tty" ] && [ -w "$tty" ] || return 0
+    [ "$ASSUME_YES" = "1" ] && return 0
+
+    {
+        echo
+        echo "Counter-patterns extras (optional — these touch ~/.claude/ outside the agents/skills dirs):"
+        printf '  Install Claude Code hooks (branch-guard, completion-claim guard, resume primer)? [y/N] '
+    } > "$tty"
+    local ans; ans=$(tty_read) || ans=""
+    case "$ans" in y|Y|yes|YES) CP_HOOKS_INSTALL=1 ;; *) ;; esac
+
+    {
+        printf '  Insert the counter-patterns block into your CLAUDE.md? [prepend/append/skip] '
+    } > "$tty"
+    ans=$(tty_read) || ans=""
+    case "$ans" in
+        prepend|Prepend|PREPEND|p|P) CP_BLOCK_MODE="prepend" ;;
+        append|Append|APPEND|a|A)    CP_BLOCK_MODE="append" ;;
+        *) ;;
+    esac
+}
+
+cp_validate_extras() {
+    if [ "$CP_HOOKS_INSTALL" = 1 ]; then
+        case " $CLIS " in
+            *" claude "*) ;;
+            *) die "--counter-patterns-hooks requires 'claude' in --for (hooks target Claude Code's hook surface)" ;;
+        esac
+    fi
+}
+
+# Install side: invoke the staged helpers. Records state for the manifest writer.
+CP_BLOCK_INSTALLED=0
+CP_BLOCK_INSTALLED_TARGET=""
+CP_BLOCK_INSTALLED_MODE=""
+CP_HOOKS_INSTALLED=0
+CP_HOOKS_INSTALLED_DIR=""
+
+cp_run_block_install() {
+    [ -n "$CP_BLOCK_MODE" ] || return 0
+    local helper="$STAGE/src/skills/global-scope/counter-patterns/install-claude-md-block.sh"
+    local block="$STAGE/src/skills/global-scope/counter-patterns/CLAUDE_MD_BLOCK.md"
+    [ -f "$helper" ] || die "counter-patterns helper missing in source: $helper"
+    [ -f "$block" ] || die "counter-patterns block missing in source: $block"
+    local target="${CP_BLOCK_TARGET:-$(cp_default_block_target)}"
+    echo "  • counter-patterns CLAUDE.md block ($CP_BLOCK_MODE) → $target"
+    bash "$helper" "$CP_BLOCK_MODE" --target "$target" --block "$block" >/dev/null
+    CP_BLOCK_INSTALLED=1
+    CP_BLOCK_INSTALLED_TARGET="$target"
+    CP_BLOCK_INSTALLED_MODE="$CP_BLOCK_MODE"
+}
+
+cp_run_hooks_install() {
+    [ "$CP_HOOKS_INSTALL" = 1 ] || return 0
+    local helper="$STAGE/src/skills/global-scope/counter-patterns/hooks/install-hooks.sh"
+    [ -f "$helper" ] || die "counter-patterns hooks installer missing in source: $helper"
+    local target="${CP_HOOKS_TARGET:-$(cp_default_hooks_target)}"
+    echo "  • counter-patterns hooks → $target"
+    bash "$helper" install --target "$target" >/dev/null
+    CP_HOOKS_INSTALLED=1
+    CP_HOOKS_INSTALLED_DIR="$target"
+    echo "    (a settings.json snippet was printed by the helper; merge it into ~/.claude/settings.json by hand)"
+    echo "    full snippet:  bash $(cli_skills_dir claude)/counter-patterns/hooks/install-hooks.sh install --snippet-only --target \"$target\""
+}
+
+# Uninstall side: inline the removal so we don't need to fetch the source.
+
+CP_BLOCK_BEGIN_MARKER="<!-- BEGIN counter-patterns block (managed by AgentSkills counter-patterns skill) -->"
+CP_BLOCK_END_MARKER="<!-- END counter-patterns block -->"
+
+cp_block_remove_inline() {
+    # $1 = target file
+    local target="$1"
+    [ -f "$target" ] || return 0
+    grep -qF "$CP_BLOCK_BEGIN_MARKER" "$target" || return 0
+    grep -qF "$CP_BLOCK_END_MARKER" "$target" || return 0
+    local tmp; tmp=$(mktemp -t agent-skills-cp.XXXXXX)
+    /usr/bin/awk -v B="$CP_BLOCK_BEGIN_MARKER" -v E="$CP_BLOCK_END_MARKER" '
+        BEGIN { state = 0; held_blank = 0 }
+        state == 0 {
+            if (index($0, B) > 0) { state = 1; held_blank = 0; next }
+            if ($0 == "") { if (held_blank) print prev; prev = $0; held_blank = 1; next }
+            if (held_blank) { print prev; held_blank = 0 }
+            print
+            next
+        }
+        state == 1 {
+            if (index($0, E) > 0) { state = 2 }
+            next
+        }
+        state == 2 {
+            if ($0 == "") { state = 3; next }
+            state = 3
+            print
+            next
+        }
+        state == 3 { print }
+        END {
+            if (state == 0 && held_blank) print prev
+        }
+    ' "$target" > "$tmp"
+    cp "$target" "${target}.bak"
+    mv "$tmp" "$target"
+}
+
+cp_hooks_uninstall_inline() {
+    # $1 = hooks dir
+    local dir="$1"
+    [ -d "$dir" ] || return 0
+    local h
+    for h in pre-completion.sh pre-tool-branch-guard.sh session-start-primer.sh user-prompt-resume-detect.sh; do
+        rm -f "$dir/$h"
+    done
+}
+
+# Read counter-patterns scalars from a manifest file. Returns empty if absent.
+manifest_extras_scalar() {
+    local mpath="$1" group="$2" key="$3"
+    /usr/bin/awk -v group="$group" -v key="$key" '
+        $0 ~ "\""group"\":[[:space:]]*{" { in_group = 1; next }
+        in_group && $0 ~ "\""key"\":" {
+            sub(".*\""key"\":[[:space:]]*\"", "")
+            sub("\".*", "")
+            print
+            exit
+        }
+        in_group && /^    }/ { in_group = 0 }
+    ' "$mpath"
 }
 
 # ---- main -----------------------------------------------------------------
@@ -834,6 +1121,7 @@ case "$ACTION" in
 
     list)
         CLIS=$(resolve_clis)
+        cp_validate_extras
         if [ -n "$FROM_LOCAL" ]; then
             echo "Reading local source at $FROM_LOCAL …"
         else
@@ -845,6 +1133,12 @@ case "$ACTION" in
 
     install)
         CLIS=$(resolve_clis)
+
+        # Resolve counter-patterns extras intent. Prompt only if no flags were
+        # set, claude is in $CLIS, and we have a TTY.
+        cp_prompt_for_extras
+        cp_validate_extras
+
         echo "AgentSkills installer"
         echo "  source : $REPO @ $REF"
         echo "  CLIs   : $CLIS"
@@ -852,6 +1146,12 @@ case "$ACTION" in
             echo "  dest   : $DEST (override)"
         else
             for cli in $CLIS; do printf '  %-10s -> %s\n' "$cli" "$(cli_root "$cli")"; done
+        fi
+        if [ -n "$CP_BLOCK_MODE" ]; then
+            echo "  extras : counter-patterns block ($CP_BLOCK_MODE) → ${CP_BLOCK_TARGET:-$(cp_default_block_target)}"
+        fi
+        if [ "$CP_HOOKS_INSTALL" = 1 ]; then
+            echo "  extras : counter-patterns hooks → ${CP_HOOKS_TARGET:-$(cp_default_hooks_target)}"
         fi
         MPATH=$(manifest_path)
         if [ -f "$MPATH" ]; then
@@ -885,6 +1185,14 @@ case "$ACTION" in
         install_skills_dedup | while read -r installed_path; do
             echo "  • skills → $installed_path"
         done
+
+        # Counter-patterns extras run after skills land so the bundled helpers
+        # are on disk at their install location (used by --uninstall later).
+        if [ -n "$CP_BLOCK_MODE" ] || [ "$CP_HOOKS_INSTALL" = 1 ]; then
+            echo "Installing counter-patterns extras …"
+            cp_run_block_install
+            cp_run_hooks_install
+        fi
 
         # Resolve SHA if we cloned with git, else leave as the ref.
         RESOLVED_SHA="$REF"

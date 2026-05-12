@@ -1,6 +1,6 @@
 ---
 name: skill-sync
-description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .pi/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) is skills-only — repo-scope skills install into <repo>/.agents/skills/ which Pi auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
+description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .pi/, .crush/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) and Crush (charmbracelet/crush) are skills-only — repo-scope skills install into <repo>/.agents/skills/ and <repo>/.crush/skills/ which the harness auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
 ---
 
 # Skill Sync
@@ -60,6 +60,7 @@ In the target repo, installs go under a per-CLI directory. The installer manifes
 | Codex | `<repo>/.codex/` | `.toml` |
 | Gemini CLI | `<repo>/.gemini/` | `.md` |
 | Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (skills only — no agents) | — |
+| Crush | `<repo>/.crush/skills/` and `<repo>/.agents/skills/` (skills only — agents live in crush.json) | — |
 
 For each selected CLI the install shape is:
 
@@ -95,7 +96,7 @@ source:
   repo: your-org/ClaudeSkills           # GitHub owner/repo
   ref: main                             # branch, tag, or commit SHA (prefer a pinned tag)
 target_clis: []                         # optional. Empty = read from ~/.agent-skills/installer-manifest.json
-                                        # else comma-list of: claude, opencode, kilo, codex, gemini, pi
+                                        # else comma-list of: claude, opencode, kilo, codex, gemini, pi, cursor, crush
 allowlist: []                           # empty = every skill/agent in source is available
                                         # non-empty = only these directory names may be installed
 deny: []                                # always exclude these (takes precedence over allowlist)
@@ -114,7 +115,7 @@ auth:
    - If the user passed `--for <list>` on invocation, use that.
    - Else if config has `target_clis:` non-empty, use that.
    - Else read `~/.agent-skills/installer-manifest.json` and use the `clis` array from the most recent `install.sh` run.
-   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / gemini / pi".
+   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / gemini / pi / cursor / crush".
 3. If `auth.method: gh`, check `gh auth status` succeeds; if `ssh`, check `ssh -T git@github.com 2>&1 | grep -q 'successfully authenticated'`. If auth is missing, **stop** with an actionable message — do not prompt to store tokens.
 
 ### Step 2 — Detect the repo's toolchains and workflow signals
@@ -188,16 +189,24 @@ case "$cli" in
     kilo)     root="<repo>/.kilo" ;;
     codex)    root="<repo>/.codex" ;;
     gemini)   root="<repo>/.gemini" ;;
-    pi)       root="<repo>/.pi"  ;;  # Pi has no subagents — skills only (handled below)
+    cursor)   root="<repo>/.cursor" ;;
+    pi)       root="<repo>/.pi"  ;;     # Pi has no subagents — skills only (handled below)
+    crush)    root="<repo>/.crush" ;;   # Crush has no subagents — skills only (handled below)
 esac
 
-# Pi has no subagents. For Pi, install repo-scope skills into a shared
-# per-repo location that Pi auto-discovers (`<repo>/.agents/skills/`),
-# then continue to the next CLI without rendering any agents.
+# Pi and Crush both have no subagents. Install repo-scope skills into a shared
+# per-repo location each harness auto-discovers, then continue to the next CLI
+# without rendering any agents.
 if [ "$cli" = "pi" ]; then
     pi_skills_dir="<repo>/.agents/skills"
     mkdir -p "$pi_skills_dir"
     rsync -a --delete "$CACHE/skills/repo-scope/<name>/" "$pi_skills_dir/<name>/"
+    continue
+fi
+if [ "$cli" = "crush" ]; then
+    crush_skills_dir="<repo>/.crush/skills"
+    mkdir -p "$crush_skills_dir"
+    rsync -a --delete "$CACHE/skills/repo-scope/<name>/" "$crush_skills_dir/<name>/"
     continue
 fi
 
