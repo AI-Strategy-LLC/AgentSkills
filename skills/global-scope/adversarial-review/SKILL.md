@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: "Get a second-opinion review from a different AI model — dispatches a review skill (deep-review, branch-review, bdd-audit, honesty-audit, counter-patterns, coverage-audit) to a different CLI (codex, gemini, opencode, crush, kilo) via the adversarial-review MCP server. Use when the user asks for 'external review', 'adversarial review', 'second opinion', 'different model review', 'check this with another model', or before merging anything on a load-bearing surface (security, auth, deploy pipeline, persistence, multi-agent orchestration) where self-review's 80% catch rate isn't enough. Requires the adversarial-review MCP server to be registered with this CLI (one-time: `bash mcp/adversarial-review/install.sh --for <cli>`)."
+description: "Get a second-opinion review from a different AI model — dispatches a review skill (deep-review, branch-review, bdd-audit, honesty-audit, counter-patterns, coverage-audit) to a different CLI (codex, gemini, opencode, crush, kilo) via the AdversarialReviewMCP server. Use when the user asks for 'external review', 'adversarial review', 'second opinion', 'different model review', 'check this with another model', or before merging anything on a load-bearing surface (security, auth, deploy pipeline, persistence, multi-agent orchestration) where self-review's 80% catch rate isn't enough. Requires the AdversarialReviewMCP server to be installed and registered with this CLI (one-time setup; see step 1 below)."
 ---
 
 # Adversarial Review
@@ -11,15 +11,18 @@ catches "shipped fraud" features that look complete on self-review but are
 hollow inside.
 
 This skill is the trigger that routes such requests through the
-`adversarial-review` MCP server, which spawns a different AI CLI to run the
-requested review.
+**AdversarialReviewMCP** server, which spawns a different AI CLI to run the
+requested review. The server lives in its own repository:
+<https://github.com/AI-Strategy-LLC/AdversarialReviewMCP>.
 
 ## What to do
 
 1. **Confirm the MCP server is registered.** Call the `list_reviewers` MCP
    tool. If it errors, the server isn't installed — direct the user to:
-   ```
-   cd <repo>/mcp/adversarial-review && bash install.sh --for claude
+   ```bash
+   git clone https://github.com/AI-Strategy-LLC/AdversarialReviewMCP
+   cd AdversarialReviewMCP
+   bash install.sh --for claude     # (or --for codex, gemini, cursor, …)
    ```
 
 2. **Confirm at least one reviewer is installed and authenticated.** From
@@ -94,4 +97,6 @@ brew install charmbracelet/tap/crush
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-Then `bash <repo>/install.sh --for <cli>` to give that CLI the review skills.
+Then `bash <AgentSkills>/install.sh --for <cli>` to give that CLI the
+review skills (the skills live in this repo; the MCP server lives in
+AdversarialReviewMCP).
