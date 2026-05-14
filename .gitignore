@@ -19,3 +19,8 @@
 # wipes at end-of-run (citation batches, doc-summarizer manifests + excerpts,
 # vulnscan tool output). Never part of the deliverable.
 docs/ato-package/.staging/
+
+# Local git worktree scratch space — agents (and external dispatchers
+# like the AdversarialReviewMCP server) sometimes drop worktrees here for
+# isolated runs.
+.worktrees/
