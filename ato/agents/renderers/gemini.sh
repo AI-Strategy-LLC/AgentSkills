@@ -25,13 +25,16 @@ tools=$(meta_top "$meta" tools)
 # valid Gemini IDs. Omitting the field defaults to `inherit`, which is the
 # right behavior — the user picks the model in their Gemini config.
 
-cat <<EOF
----
-name: $name
-description: $description
-tools: $tools
----
-
-EOF
+# Gemini's agent loader validates each `tools:` entry against its built-in
+# tool registry, so the canonical Claude names are mapped to Gemini's names
+# and emitted as a YAML block sequence (see tools_for_gemini in _lib.sh).
+{
+    printf -- '---\n'
+    printf 'name: %s\n' "$name"
+    printf 'description: %s\n' "$description"
+    printf 'tools:\n'
+    tools_for_gemini "$tools"
+    printf -- '---\n\n'
+}
 cat "$body"
 inline_references "$base"

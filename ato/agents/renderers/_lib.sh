@@ -144,3 +144,56 @@ tools_as_record() {
         esac
     done
 }
+
+# tools_for_gemini <tools-array-string> [indent]
+# Converts a YAML inline list like `[Bash, Read, Write]` into a YAML block
+# sequence using Gemini CLI's built-in tool names. Gemini's agent loader
+# (packages/core/src/agents/agentLoader.ts) validates every `tools:` entry
+# against ALL_BUILTIN_TOOL_NAMES via isValidToolName() and rejects the
+# canonical Claude names (Bash, Read, Write, ...) with "Invalid tool name".
+#
+#     tools:
+#       - run_shell_command
+#       - read_file
+#
+# Mapping (canonical Claude alias -> Gemini built-in tool name):
+#   Bash -> run_shell_command   Read -> read_file       Write -> write_file
+#   Edit -> replace             Grep -> grep_search     Glob -> glob
+#   Skill -> activate_skill     Agent -> invoke_agent
+#   WebFetch -> web_fetch       WebSearch -> google_web_search
+tools_for_gemini() {
+    local raw="$1"
+    local indent="${2:-  }"
+
+    # Strip brackets and split on commas.
+    raw="${raw#\[}"
+    raw="${raw%\]}"
+
+    local IFS=,
+    for t in $raw; do
+        # trim whitespace
+        t=$(printf '%s' "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$t" ] && continue
+        local lower mapped
+        lower=$(printf '%s' "$t" | tr '[:upper:]' '[:lower:]')
+        case "$lower" in
+            bash)      mapped=run_shell_command ;;
+            read)      mapped=read_file ;;
+            write)     mapped=write_file ;;
+            edit)      mapped=replace ;;
+            grep)      mapped=grep_search ;;
+            glob)      mapped=glob ;;
+            skill)     mapped=activate_skill ;;
+            agent)     mapped=invoke_agent ;;
+            webfetch)  mapped=web_fetch ;;
+            websearch) mapped=google_web_search ;;
+            *)
+                # Unknown tool: emit lowercased and let Gemini's loader
+                # complain if it doesn't recognize it. Better than silently
+                # dropping a capability the agent body relies on.
+                mapped="$lower"
+                ;;
+        esac
+        printf '%s- %s\n' "$indent" "$mapped"
+    done
+}

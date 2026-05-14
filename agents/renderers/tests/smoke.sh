@@ -42,12 +42,19 @@ grep -q '^## Step 1 — Gather' <<<"$out" || fail "kilo: body missing"
 
 out=$("$renderers/gemini.sh" "$base")
 grep -q '^name: branch-review$' <<<"$out" || fail "gemini: missing name"
-grep -q '^model: sonnet$' <<<"$out" || fail "gemini: missing model"
+# `model:` is intentionally NOT emitted — Gemini expects Gemini-family IDs,
+# not our canonical Claude aliases; omitting it defaults to `inherit`.
+! grep -q '^model:' <<<"$out" || fail "gemini: must not emit model (Claude aliases are invalid Gemini IDs)"
+grep -q '^tools:$' <<<"$out" || fail "gemini: tools should be a block sequence (header on its own line)"
+! grep -q '^tools: \[' <<<"$out" || fail "gemini: tools must be mapped names, not the canonical [Bash, ...] list"
+grep -q '^  - run_shell_command$' <<<"$out" || fail "gemini: expected 'Bash' mapped to 'run_shell_command'"
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "gemini: body missing"
 
 out=$("$renderers/codex.sh" "$base")
 grep -q '^name = "branch-review"$' <<<"$out" || fail "codex: missing name"
-grep -q '^model = "sonnet"$' <<<"$out" || fail "codex: missing model"
+# `model` is intentionally NOT emitted — Codex expects OpenAI model IDs, not
+# our canonical Claude aliases; omitting it inherits the parent session model.
+! grep -q '^model = ' <<<"$out" || fail "codex: must not emit model (Claude aliases are invalid Codex IDs)"
 grep -q '^sandbox_mode = "read-only"$' <<<"$out" || fail "codex: missing sandbox_mode"
 grep -qF "developer_instructions = '''" <<<"$out" || fail "codex: missing developer_instructions opener"
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "codex: body missing"
