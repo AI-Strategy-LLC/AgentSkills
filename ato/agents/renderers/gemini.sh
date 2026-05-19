@@ -36,5 +36,13 @@ tools=$(meta_top "$meta" tools)
     tools_for_gemini "$tools"
     printf -- '---\n\n'
 }
-cat "$body"
-inline_references "$base"
+
+# The body + inlined references are routed through gemini_escape_placeholders
+# so that literal `${WORD}` patterns in markdown documentation don't trip
+# Gemini's template validator. See _lib.sh for why and how. The frontmatter
+# block above is emitted unfiltered — its values are author-provided metadata
+# (name/description) that we never want rewritten.
+{
+    cat "$body"
+    inline_references "$base"
+} | gemini_escape_placeholders

@@ -60,6 +60,49 @@ grep -qF "developer_instructions = '''" <<<"$out" || fail "codex: missing develo
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "codex: body missing"
 tail -n 1 <<<"$out" | grep -qF "'''" || fail "codex: missing developer_instructions closer"
 
+# Gemini template-placeholder escape: deep-review's body and references
+# legitimately contain literal `${VAR}` and `${X}` in markdown (documenting
+# the shell-style interpolation failure mode the agent is supposed to look
+# for). Gemini's agent loader treats any `${WORD}` in the rendered body as
+# a required input and refuses to load the agent — there is no escape syntax.
+# gemini_escape_placeholders inserts U+200B between `$` and `{` so the
+# regex /\$\{(\w+)\}/g fails to match. Confirm:
+#   1) The rendered body still contains a `${...}` pattern (so the docs
+#      survive — the ZWSP only breaks the regex, not the visible text).
+#   2) The regex Gemini actually applies matches zero placeholders.
+out=$("$renderers/gemini.sh" "$renderers/../base/global-scope/deep-review")
+# The placeholder text must still be present — only the `${` adjacency is
+# broken by a ZWSP. We assert the var name + close brace survive (a strict
+# "${VAR}" grep would falsely fail because of the inserted ZWSP).
+grep -q 'VAR}' <<<"$out" || fail "gemini: deep-review body lost its \${VAR} documentation"
+grep -q '{X}' <<<"$out" || fail "gemini: deep-review languages.md lost its \${X} example"
+matches=$(printf '%s' "$out" | awk '
+    BEGIN { count = 0 }
+    {
+        n = length($0); i = 1
+        while (i <= n) {
+            c = substr($0, i, 1)
+            if (c == "$" && i + 1 <= n && substr($0, i + 1, 1) == "{") {
+                j = i + 2; word_only = 1
+                while (j <= n) {
+                    ch = substr($0, j, 1)
+                    if (ch == "}") break
+                    if (ch !~ /[A-Za-z0-9_]/) { word_only = 0; break }
+                    j++
+                }
+                if (word_only && j <= n && j > i + 2) {
+                    count++
+                    i = j + 1
+                    continue
+                }
+            }
+            i++
+        }
+    }
+    END { print count }
+')
+[ "$matches" = 0 ] || fail "gemini: \${WORD} pattern still matchable in deep-review output (count=$matches) — Gemini will refuse to load"
+
 # codex-agents-md: takes multiple bases, emits AGENTS.md
 out=$("$renderers/codex-agents-md.sh" \
     "$renderers/../base/global-scope/branch-review" \

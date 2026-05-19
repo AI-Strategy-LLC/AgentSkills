@@ -186,6 +186,18 @@ cli_agent_ext() {
     esac
 }
 
+# cli_agents_subdir <cli>
+# The subdirectory name under each CLI's root where rendered agents live.
+# Almost every CLI uses `agents/` (plural). Kilo is the odd one out — its
+# canonical user-level path is documented as `~/.config/kilo/agent/` (singular).
+# Keeping this in one helper means we never accidentally drift between callers.
+cli_agents_subdir() {
+    case "$1" in
+        kilo) printf 'agent' ;;
+        *)    printf 'agents' ;;
+    esac
+}
+
 # cli_skills_dir <cli>
 # Where to physically install global skills for a given CLI. Four CLIs
 # (opencode, kilo, gemini, codex) all auto-discover ~/.agents/skills/ as a
@@ -481,10 +493,19 @@ install_cli() {
     local codex_agents_md="$STAGE/src/agents/renderers/codex-agents-md.sh"
     local root; root=$(cli_root "$cli")
     local ext; ext=$(cli_agent_ext "$cli")
+    local adir; adir=$(cli_agents_subdir "$cli")
 
     [ -x "$renderer" ] || die "missing or non-executable renderer: $renderer"
 
-    mkdir -p "$root/agents"
+    mkdir -p "$root/$adir"
+
+    # Defensive: Kilo's path moved from `agents/` (plural — what older
+    # installs of this script wrote) to `agent/` (singular — what Kilo
+    # actually documents and reads). If a previous install left a stale
+    # plural directory, clean it up so users don't see duplicate agents.
+    if [ "$cli" = kilo ] && [ -d "$root/agents" ] && [ "$root/agents" != "$root/$adir" ]; then
+        rm -rf "$root/agents"
+    fi
 
     # Note: skills are installed by install_skills_dedup() in the main loop,
     # not here. Each CLI's skills directory is computed by cli_skills_dir,
@@ -500,20 +521,20 @@ install_cli() {
         bases+=("$d")
 
         if agent_is_dir_form "$d" && ! cli_uses_flat_only "$cli"; then
-            # Directory form: write the rendered file inside <cli-root>/agents/<name>/<name>.<ext>
-            local target_dir="$root/agents/$name"
+            # Directory form: write the rendered file inside <cli-root>/<adir>/<name>/<name>.<ext>
+            local target_dir="$root/$adir/$name"
             rm -rf "$target_dir"
-            rm -f "$root/agents/$name.$ext"
+            rm -f "$root/$adir/$name.$ext"
             mkdir -p "$target_dir"
             "$renderer" "$d" > "$target_dir/$name.$ext"
             copy_agent_bundled "$d" "$target_dir"
         else
-            # Flat form: single file at <cli-root>/agents/<name>.<ext>.
+            # Flat form: single file at <cli-root>/<adir>/<name>.<ext>.
             # The rm -rf cleans up any residual directory-form layout from a
             # previous install (important after switching opencode/kilo/gemini
             # away from directory form).
-            rm -rf "$root/agents/$name"
-            "$renderer" "$d" > "$root/agents/$name.$ext"
+            rm -rf "$root/$adir/$name"
+            "$renderer" "$d" > "$root/$adir/$name.$ext"
         fi
     done
 
@@ -568,7 +589,7 @@ kilo_defensive_setup() {
         echo "  .opencode/ directories for agents. To isolate Kilo, add this to"
         echo "  your Kilo settings file (key name may vary by Kilo version):"
         echo
-        echo "    { \"agent_scan_paths\": [\"\$HOME/.config/kilo/agents\"] }"
+        echo "    { \"agent_scan_paths\": [\"\$HOME/.config/kilo/agent\"] }"
         echo
         echo "  Settings file: ${kilo_cfg:-$kilo_cfg_alt}"
     else
@@ -712,6 +733,7 @@ prune_removed() {
         local root; root=$(cli_root "$cli")
         local sdir; sdir=$(cli_skills_dir "$cli")
         local ext; ext=$(cli_agent_ext "$cli")
+        local adir; adir=$(cli_agents_subdir "$cli")
         local old_sdir; old_sdir=$(manifest_scalar "$mpath.old" "$cli" skills_root)
 
         # If the old manifest recorded a different skills_root for this CLI,
@@ -744,10 +766,10 @@ prune_removed() {
         old_flat=$(manifest_list "$mpath.old" "$cli" agents_flat)
         old_dir=$(manifest_list "$mpath.old" "$cli" agents_dir)
         for n in $old_flat; do
-            if [ ! -d "$src_agents/$n" ]; then rm -f "$root/agents/$n.$ext"; fi
+            if [ ! -d "$src_agents/$n" ]; then rm -f "$root/$adir/$n.$ext"; fi
         done
         for n in $old_dir; do
-            if [ ! -d "$src_agents/$n" ]; then rm -rf "$root/agents/$n"; fi
+            if [ ! -d "$src_agents/$n" ]; then rm -rf "$root/$adir/$n"; fi
         done
     done
 }
@@ -785,6 +807,7 @@ uninstall() {
         local root; root=$(cli_root "$cli")
         local sdir; sdir=$(cli_skills_dir "$cli")
         local ext; ext=$(cli_agent_ext "$cli")
+        local adir; adir=$(cli_agents_subdir "$cli")
 
         # Skills: only remove if no remaining CLI shares this physical path.
         case "$skill_paths_processed" in
@@ -801,8 +824,14 @@ uninstall() {
                 ;;
         esac
 
-        for n in $(manifest_list "$mpath" "$cli" agents_flat); do rm -f "$root/agents/$n.$ext"; done
-        for n in $(manifest_list "$mpath" "$cli" agents_dir);  do rm -rf "$root/agents/$n"; done
+        for n in $(manifest_list "$mpath" "$cli" agents_flat); do rm -f "$root/$adir/$n.$ext"; done
+        for n in $(manifest_list "$mpath" "$cli" agents_dir);  do rm -rf "$root/$adir/$n"; done
+        # Defensive: also clear the legacy `agents/` (plural) dir for Kilo —
+        # users coming from an older installer will still have it on disk and
+        # would otherwise see ghost agents listed.
+        if [ "$cli" = kilo ] && [ -d "$root/agents" ] && [ "$root/agents" != "$root/$adir" ]; then
+            rm -rf "$root/agents"
+        fi
         [ "$cli" = codex ] && rm -f "$root/AGENTS.md"
     done
 

@@ -190,6 +190,17 @@ cli_agent_ext() {
     esac
 }
 
+# cli_agents_subdir <cli>
+# The subdirectory name under each CLI's root where rendered agents live.
+# Almost every CLI uses `agents/` (plural). Kilo is the odd one out — its
+# canonical user-level path is documented as `~/.config/kilo/agent/` (singular).
+cli_agents_subdir() {
+    case "$1" in
+        kilo) printf 'agent' ;;
+        *)    printf 'agents' ;;
+    esac
+}
+
 # Same dedup rule as the main installer: opencode/kilo/gemini/codex/pi all
 # auto-discover ~/.agents/skills/, so we install once into that shared
 # location. Claude is the only CLI that doesn't scan ~/.agents/, so it gets
@@ -456,10 +467,16 @@ install_cli() {
     local codex_agents_md="$ATO_ROOT/agents/renderers/codex-agents-md.sh"
     local root; root=$(cli_root "$cli")
     local ext; ext=$(cli_agent_ext "$cli")
+    local adir; adir=$(cli_agents_subdir "$cli")
 
     [ -x "$renderer" ] || die "missing or non-executable renderer: $renderer"
 
-    mkdir -p "$root/agents"
+    mkdir -p "$root/$adir"
+
+    # Defensive cleanup of the legacy plural Kilo directory (see install.sh).
+    if [ "$cli" = kilo ] && [ -d "$root/agents" ] && [ "$root/agents" != "$root/$adir" ]; then
+        rm -rf "$root/agents"
+    fi
 
     local bases=()
     for d in "$src_agents"/*/; do
@@ -468,15 +485,15 @@ install_cli() {
         bases+=("$d")
 
         if agent_is_dir_form "$d" && ! cli_uses_flat_only "$cli"; then
-            local target_dir="$root/agents/$name"
+            local target_dir="$root/$adir/$name"
             rm -rf "$target_dir"
-            rm -f "$root/agents/$name.$ext"
+            rm -f "$root/$adir/$name.$ext"
             mkdir -p "$target_dir"
             "$renderer" "$d" > "$target_dir/$name.$ext"
             copy_agent_bundled "$d" "$target_dir"
         else
-            rm -rf "$root/agents/$name"
-            "$renderer" "$d" > "$root/agents/$name.$ext"
+            rm -rf "$root/$adir/$name"
+            "$renderer" "$d" > "$root/$adir/$name.$ext"
         fi
     done
 
@@ -622,6 +639,7 @@ prune_removed() {
         local root; root=$(cli_root "$cli")
         local sdir; sdir=$(cli_skills_dir "$cli")
         local ext; ext=$(cli_agent_ext "$cli")
+        local adir; adir=$(cli_agents_subdir "$cli")
         local old_sdir; old_sdir=$(manifest_scalar "$mpath.old" "$cli" skills_root)
 
         if [ -n "$old_sdir" ] && [ "$old_sdir" != "$sdir" ]; then
@@ -645,10 +663,10 @@ prune_removed() {
         old_flat=$(manifest_list "$mpath.old" "$cli" agents_flat)
         old_dir=$(manifest_list "$mpath.old" "$cli" agents_dir)
         for n in $old_flat; do
-            if [ ! -d "$src_agents/$n" ]; then rm -f "$root/agents/$n.$ext"; fi
+            if [ ! -d "$src_agents/$n" ]; then rm -f "$root/$adir/$n.$ext"; fi
         done
         for n in $old_dir; do
-            if [ ! -d "$src_agents/$n" ]; then rm -rf "$root/agents/$n"; fi
+            if [ ! -d "$src_agents/$n" ]; then rm -rf "$root/$adir/$n"; fi
         done
     done
 }
@@ -682,6 +700,7 @@ uninstall() {
         local root; root=$(cli_root "$cli")
         local sdir; sdir=$(cli_skills_dir "$cli")
         local ext; ext=$(cli_agent_ext "$cli")
+        local adir; adir=$(cli_agents_subdir "$cli")
 
         case "$skill_paths_processed" in
             *" $sdir "*) ;;
@@ -697,8 +716,12 @@ uninstall() {
                 ;;
         esac
 
-        for n in $(manifest_list "$mpath" "$cli" agents_flat); do rm -f "$root/agents/$n.$ext"; done
-        for n in $(manifest_list "$mpath" "$cli" agents_dir);  do rm -rf "$root/agents/$n"; done
+        for n in $(manifest_list "$mpath" "$cli" agents_flat); do rm -f "$root/$adir/$n.$ext"; done
+        for n in $(manifest_list "$mpath" "$cli" agents_dir);  do rm -rf "$root/$adir/$n"; done
+        # Defensive: also clear the legacy plural Kilo dir.
+        if [ "$cli" = kilo ] && [ -d "$root/agents" ] && [ "$root/agents" != "$root/$adir" ]; then
+            rm -rf "$root/agents"
+        fi
         [ "$cli" = codex ] && rm -f "$root/ATO_AGENTS.md"
     done
 

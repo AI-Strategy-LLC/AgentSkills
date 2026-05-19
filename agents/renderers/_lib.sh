@@ -145,6 +145,67 @@ tools_as_record() {
     done
 }
 
+# gemini_escape_placeholders
+# Filter stdin -> stdout, defusing `${WORD}` patterns so Gemini's agent loader
+# does not treat them as required template inputs.
+#
+# Gemini's templateString() (packages/core/src/agents/utils.ts) applies the
+# regex /\$\{(\w+)\}/g to the entire agent body and refuses to load the agent
+# if any matched WORD isn't in the inputs map (query, cliVersion, activeModel,
+# today). There is no escape syntax — the regex match is unconditional.
+#
+# We insert a zero-width space (U+200B) between `$` and `{` so the regex's
+# literal `\{` fails to match the next character. ZWSP is invisible in
+# rendered markdown and effectively invisible to LLM tokenizers, so the
+# semantic content of the body is preserved for the agent that reads it.
+# Doing it at render time keeps the source content CLI-agnostic — agent
+# bodies legitimately contain `${VAR}` in documentation (e.g. when describing
+# shell-style interpolation as a failure mode to look for).
+#
+# CAVEAT: if an agent body ever needs to emit a literal `${VAR}` for the LLM
+# to copy verbatim into a shell command (not currently the case for any
+# agent in this repo), this transformation will smuggle a ZWSP into the
+# shell command and break it. If that ever becomes a need, replace this
+# blanket transform with a marker-aware version.
+gemini_escape_placeholders() {
+    # POSIX awk: insert ZWSP (UTF-8 bytes E2 80 8B) between `$` and `{` for
+    # any `${WORD}` run where WORD is one or more `[A-Za-z0-9_]`. Anything
+    # else (e.g. `${X-default}`, `${ VAR }`) is left alone — Gemini's regex
+    # wouldn't match it anyway. The pattern is a literal-text walk rather
+    # than a regex replace so we avoid GNU-only `gensub` and don't depend
+    # on perl/python being installed.
+    awk '
+        BEGIN { zwsp = sprintf("%c%c%c", 226, 128, 139) }
+        {
+            line = $0
+            out = ""
+            n = length(line)
+            i = 1
+            while (i <= n) {
+                c = substr(line, i, 1)
+                if (c == "$" && i + 1 <= n && substr(line, i + 1, 1) == "{") {
+                    j = i + 2
+                    word_only = 1
+                    while (j <= n) {
+                        ch = substr(line, j, 1)
+                        if (ch == "}") break
+                        if (ch !~ /[A-Za-z0-9_]/) { word_only = 0; break }
+                        j++
+                    }
+                    if (word_only && j <= n && j > i + 2) {
+                        out = out "$" zwsp "{" substr(line, i + 2, j - i - 2) "}"
+                        i = j + 1
+                        continue
+                    }
+                }
+                out = out c
+                i++
+            }
+            print out
+        }
+    '
+}
+
 # tools_for_gemini <tools-array-string> [indent]
 # Converts a YAML inline list like `[Bash, Read, Write]` into a YAML block
 # sequence using Gemini CLI's built-in tool names. Gemini's agent loader

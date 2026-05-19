@@ -34,7 +34,7 @@ A paired stub and agent live in matching scopes — if the stub is global, the a
 |---|---|---|---|---|---|
 | Claude Code | `~/.claude/agents/` | `~/.claude/skills/` | `<repo>/.claude/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | OpenCode | `~/.config/opencode/agents/` | `~/.agents/skills/` (shared) | `<repo>/.opencode/` | `<name>.md` (MD + YAML, no name) | filename |
-| Kilo Code | `~/.config/kilo/agents/` | `~/.agents/skills/` (shared) | `<repo>/.kilo/` | `<name>.md` (MD + YAML, no name) | filename |
+| Kilo Code | `~/.config/kilo/agent/` (singular per Kilo docs) | `~/.agents/skills/` (shared) | `<repo>/.kilo/` | `<name>.md` (MD + YAML, no name) | filename |
 | OpenAI Codex | `~/.codex/agents/` | `~/.agents/skills/` (shared) | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` | TOML `name =` |
 | Gemini CLI | `~/.gemini/agents/` | `~/.agents/skills/` (shared) | `<repo>/.gemini/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Pi (pi.dev) | — *(no subagents)* | `~/.agents/skills/` (shared) | `<repo>/.pi/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
