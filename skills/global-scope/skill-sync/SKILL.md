@@ -1,6 +1,6 @@
 ---
 name: skill-sync
-description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .antigravity/, .pi/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) is skills-only — repo-scope skills install into <repo>/.agents/skills/ which Pi auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
+description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .gemini/antigravity-cli/, .pi/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) is skills-only — repo-scope skills install into <repo>/.agents/skills/ which Pi auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
 ---
 
 # Skill Sync
@@ -59,7 +59,7 @@ In the target repo, installs go under a per-CLI directory. The installer manifes
 | Kilo Code | `<repo>/.kilo/` | `.md` |
 | Codex | `<repo>/.codex/` | `.toml` |
 | Gemini CLI | `<repo>/.gemini/` | `.md` |
-| Antigravity CLI (`agy`) | `<repo>/.antigravity/` | `.md` |
+| Antigravity CLI (`agy`) | `<repo>/.gemini/antigravity-cli/` *(extrapolated; verify on a real per-repo install)* | `.md` |
 | Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (skills only — no agents) | — |
 
 For each selected CLI the install shape is:
@@ -189,7 +189,7 @@ case "$cli" in
     kilo)     root="<repo>/.kilo" ;;
     codex)    root="<repo>/.codex" ;;
     gemini)   root="<repo>/.gemini" ;;
-    agy)      root="<repo>/.antigravity" ;;
+    agy)      root="<repo>/.gemini/antigravity-cli" ;;
     pi)       root="<repo>/.pi"  ;;  # Pi has no subagents — skills only (handled below)
 esac
 
@@ -294,7 +294,7 @@ Teams split on whether synced skills/agents should be committed (a team lead run
 
 Otherwise, ask via `AskUserQuestion` with two options:
 
-- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/`, `.antigravity/` (as applicable) + manifest.
+- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/` (which also covers `.gemini/antigravity-cli/` for agy) (as applicable) + manifest.
 - **Ignored** — Each developer runs `skill-sync` themselves; those directories + the manifest stay gitignored.
 
 **Apply `committed`:**
@@ -315,8 +315,7 @@ Otherwise, ask via `AskUserQuestion` with two options:
   .opencode/
   .kilo/
   .codex/
-  .gemini/
-  .antigravity/
+  .gemini/                  # also covers .gemini/antigravity-cli/ for agy
   ```
 
 - Record `commit_policy: "ignored"` in the manifest.

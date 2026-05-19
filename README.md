@@ -44,7 +44,7 @@ The ATO collection lives under its own `ato/` subtree and ships with its own ded
 | Kilo Code | `~/.config/kilo/` | `<repo>/.kilo/` | `<name>.md` |
 | OpenAI Codex | `~/.codex/` | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` |
 | Gemini CLI | `~/.gemini/` | `<repo>/.gemini/` | `<name>.md` |
-| Antigravity CLI (`agy`) | `~/.antigravity/` | `<repo>/.antigravity/` | `<name>.md` (shares Gemini's agent engine) |
+| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/` | `<repo>/.gemini/antigravity-cli/` *(extrapolated)* | `<name>.md` (shares Gemini's agent engine; literally nests under `~/.gemini/`) |
 | Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | _(skills only)_ |
 | Cursor | `~/.cursor/` | `<repo>/.cursor/` | `<name>.mdc` |
 
@@ -215,7 +215,7 @@ The PowerShell scripts use Git Bash (from Git for Windows) under the hood. If Gi
 curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude,opencode,kilo
 ```
 
-What happens: the installer fetches the repo tarball at `main` (or whatever `--ref` you pass). For each CLI in `--for`, every agent under `agents/base/global-scope/` is piped through the matching renderer (`agents/renderers/<cli>.sh`) to produce the CLI's native format, then written to that CLI's global directory (`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/`, `~/.codex/`, `~/.gemini/`, `~/.antigravity/`). Claude additionally gets `skills/global-scope/*` under `~/.claude/skills/`. Codex additionally gets an `AGENTS.md` inventory. A single manifest at `~/.agent-skills/installer-manifest.json` tracks everything so subsequent runs are idempotent. Artifacts you authored by hand are never touched — only ones listed in the manifest.
+What happens: the installer fetches the repo tarball at `main` (or whatever `--ref` you pass). For each CLI in `--for`, every agent under `agents/base/global-scope/` is piped through the matching renderer (`agents/renderers/<cli>.sh`) to produce the CLI's native format, then written to that CLI's global directory (`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/`, `~/.codex/`, `~/.gemini/`, `~/.gemini/antigravity-cli/`). Claude additionally gets `skills/global-scope/*` under `~/.claude/skills/`. Codex additionally gets an `AGENTS.md` inventory. A single manifest at `~/.agent-skills/installer-manifest.json` tracks everything so subsequent runs are idempotent. Artifacts you authored by hand are never touched — only ones listed in the manifest.
 
 **No `--for`?** If stdin is a TTY the installer will prompt multi-select. In a non-TTY pipe, `--for` is required (no silent default).
 

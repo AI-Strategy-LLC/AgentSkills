@@ -89,7 +89,7 @@ Required:
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
                         gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
-                        agy        → ~/.antigravity/ (Antigravity CLI — replaces Gemini CLI)
+                        agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — nests under ~/.gemini/)
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
@@ -169,7 +169,10 @@ cli_root() {
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
         gemini)   printf '%s/.gemini' "$HOME" ;;
-        agy)      printf '%s/.antigravity' "$HOME" ;;
+        # Antigravity CLI deliberately nests under ~/.gemini/ — see the main
+        # installer comment. ~/.antigravity/ is the desktop app's directory,
+        # NOT where the CLI reads from.
+        agy)      printf '%s/.gemini/antigravity-cli' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
         *) die "unknown CLI: $cli" ;;
@@ -210,8 +213,12 @@ cli_agents_subdir() {
 cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
-        claude)                                   bucket=".claude/skills" ;;
-        opencode|kilo|gemini|agy|codex|pi|cursor) bucket=".agents/skills" ;;
+        claude)                                bucket=".claude/skills" ;;
+        opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        # Antigravity reads ~/.gemini/antigravity-cli/skills/ reliably today;
+        # ~/.agents/skills/ is documented but currently doesn't surface in
+        # the CLI. Pin to the agy-specific path until that bug is fixed.
+        agy)                                    bucket=".gemini/antigravity-cli/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$bucket"
@@ -246,7 +253,7 @@ prompt_for_clis() {
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/         (deprecated for consumers after 2026-06-18)"
-        echo "  6) agy       → ~/.antigravity/    (Antigravity CLI — replaces Gemini CLI)"
+        echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — nests under ~/.gemini/)"
         echo "  7) pi        → ~/.pi/agent/       (skills only)"
         echo "  8) cursor    → ~/.cursor/         (rules-as-MDC)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '

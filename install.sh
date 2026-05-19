@@ -77,7 +77,7 @@ Required:
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
                         gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
-                        agy        → ~/.antigravity/ (Antigravity CLI — replaces Gemini CLI)
+                        agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — replaces Gemini CLI; shares the ~/.gemini/ root)
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
@@ -160,7 +160,11 @@ cli_root() {
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
         gemini)   printf '%s/.gemini' "$HOME" ;;
-        agy)      printf '%s/.antigravity' "$HOME" ;;
+        # Antigravity CLI deliberately nests under ~/.gemini/ — the two CLIs
+        # share a core agent engine and the same on-disk root. agy reads
+        # agents from ~/.gemini/antigravity-cli/agents/, NOT from a top-level
+        # ~/.antigravity/ (that path belongs to the Antigravity desktop app).
+        agy)      printf '%s/.gemini/antigravity-cli' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
         *) die "unknown CLI: $cli" ;;
@@ -220,7 +224,15 @@ cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
         claude)                                 bucket=".claude/skills" ;;
-        opencode|kilo|gemini|agy|codex|pi|cursor) bucket=".agents/skills" ;;
+        opencode|kilo|gemini|codex|pi|cursor)    bucket=".agents/skills" ;;
+        # Antigravity reads ~/.gemini/antigravity-cli/skills/ AND ~/.gemini/
+        # skills/ AND (per its docs) ~/.agents/skills/ — but the last one
+        # currently doesn't surface skills in practice. Pin to the agy-
+        # specific path so the install is guaranteed to work today. Move
+        # this back to ~/.agents/skills/ once Google fixes the shared-dir
+        # bug (and a single physical copy will then cover every flat-form
+        # CLI again).
+        agy)                                     bucket=".gemini/antigravity-cli/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then
@@ -259,7 +271,7 @@ prompt_for_clis() {
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/         (deprecated for consumers after 2026-06-18)"
-        echo "  6) agy       → ~/.antigravity/    (Antigravity CLI — replaces Gemini CLI)"
+        echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — replaces Gemini CLI; nests under ~/.gemini/)"
         echo "  7) pi        → ~/.pi/agent/       (skills only)"
         echo "  8) cursor    → ~/.cursor/         (rules-as-MDC)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
