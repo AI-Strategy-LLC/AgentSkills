@@ -67,6 +67,7 @@ PAIRS=(
     "agents/renderers/codex-agents-md.sh:ato/agents/renderers/codex-agents-md.sh"
     "agents/renderers/cursor.sh:ato/agents/renderers/cursor.sh"
     "agents/renderers/gemini.sh:ato/agents/renderers/gemini.sh"
+    "agents/renderers/agy.sh:ato/agents/renderers/agy.sh"
     "agents/renderers/kilo.sh:ato/agents/renderers/kilo.sh"
     "agents/renderers/opencode.sh:ato/agents/renderers/opencode.sh"
 )

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A collection of **multi-CLI AI skills and agents** for Claude Code, OpenCode, Kilo Code, OpenAI Codex, and Gemini CLI. Skills (stateless step-by-step guides surfaced by description) live under `skills/`; agents (isolated-context subprocesses) live under `agents/`. Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time.
+A collection of **multi-CLI AI skills and agents** for Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI, and Antigravity CLI (`agy`). Skills (stateless step-by-step guides surfaced by description) live under `skills/`; agents (isolated-context subprocesses) live under `agents/`. Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time.
 
 Both trees are split into **`global-scope/`** (user-level, installed once per CLI into each CLI's global directory — available in every repo) and **`repo-scope/`** (per-repo, installed by `skill-sync` into each CLI's per-repo directory only when the toolchain matches).
 
@@ -37,6 +37,7 @@ A paired stub and agent live in matching scopes — if the stub is global, the a
 | Kilo Code | `~/.config/kilo/agent/` (singular per Kilo docs) | `~/.agents/skills/` (shared) | `<repo>/.kilo/` | `<name>.md` (MD + YAML, no name) | filename |
 | OpenAI Codex | `~/.codex/agents/` | `~/.agents/skills/` (shared) | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` | TOML `name =` |
 | Gemini CLI | `~/.gemini/agents/` | `~/.agents/skills/` (shared) | `<repo>/.gemini/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
+| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/agents/` (nests under `~/.gemini/`) | `~/.gemini/antigravity-cli/skills/` (also reads `~/.gemini/skills/`; the docs claim `~/.agents/skills/` works but it currently doesn't surface) | `<repo>/.gemini/antigravity-cli/` (extrapolated; unverified) | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Pi (pi.dev) | — *(no subagents)* | `~/.agents/skills/` (shared) | `<repo>/.pi/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
 | Cursor | `~/.cursor/agents/` | `~/.agents/skills/` (shared) | `<repo>/.cursor/` | `<name>.mdc` (MDC + YAML) | filename |
 | Crush | — *(no subagents)* | `~/.config/agents/skills/` (XDG-shared) | `<repo>/.crush/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
@@ -47,19 +48,28 @@ The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept
 
 **Native Windows support.** `install.ps1` (and `ato/install.ps1`) are PowerShell wrappers that detect Git Bash, offer to install Git for Windows via `winget` (or Chocolatey, or a manual download fallback), and forward args to the bash installers. Git Bash provides bash + curl + tar + the rest of the POSIX toolset the installer needs, and handles the Windows-path translation transparently. CLI directories follow the same `~/.<cli>/` convention — `~` resolves to `%USERPROFILE%` (e.g. `C:\Users\<name>\.claude\`).
 
-**Skill placement (strategy A — single canonical location per scan-group, lean on cross-scan):** Three dedup buckets exist:
+**Skill placement (strategy A — single canonical location per scan-group, lean on cross-scan):** Four dedup buckets exist:
 
 - `~/.claude/skills/` — Claude Code only (it doesn't scan the cross-CLI paths).
 - `~/.agents/skills/` — OpenCode, Kilo, Gemini, Codex, Pi, Cursor (HOME-dot-prefixed cross-CLI compat path).
 - `~/.config/agents/skills/` — Crush (XDG-rooted cross-CLI path per Crush's `GlobalSkillsDirs()`; Crush does not scan `~/.agents/skills/`).
+- `~/.gemini/antigravity-cli/skills/` — Antigravity (`agy`). Antigravity's docs claim `~/.agents/skills/` works as a cross-CLI shared location but in practice it currently doesn't surface; pin to the agy-specific path until Google fixes that bug. When fixed, fold `agy` back into the `~/.agents/skills/` bucket.
 
-`install.sh` writes each unique skills directory exactly once per install. Result: **at most three physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
+`install.sh` writes each unique skills directory exactly once per install. Result: **at most four physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
 
 **Pi has no subagents.** Pi (pi.dev) is a "minimal terminal coding harness" whose only customization mechanism is skills (loaded from `~/.pi/agent/skills/` and `~/.agents/skills/`). It has no Agent tool, no `subagent_type`, no equivalent to `~/.claude/agents/`. The installer skips agent rendering entirely for Pi (`cli_has_agents pi` returns false; `install_cli pi` short-circuits after the skills-dedup step). **Caveat:** thin-stub skills like `branch-review`, `deep-review`, `bdd-audit`, and `ato-artifact-collector` will surface in Pi (they're skills) but their bodies say "invoke the Agent tool with `subagent_type: <agent-name>`" — which Pi cannot do. Pi users who trigger one of those stubs will get a clear runtime error from Pi's harness; consider this a known limitation, not a bug. Skills that do their work inline (`coverage-audit`, `repo-health`, `auth-config`, `auth-interview`, the language preflights, etc.) work normally in Pi.
 
 **Crush has no subagents either.** Crush (`charmbracelet/crush`) is skills-only from this installer's perspective: its `Agent` type is a JSON struct defined inline in `crush.json` under the `agents` key, with no equivalent of `~/.claude/agents/<name>.md` file-based subagents. Skills come from `$CRUSH_SKILLS_DIR`, `~/.config/crush/skills/`, `~/.config/agents/skills/`, and the project-local `.crush/skills`, `.agents/skills`, `.claude/skills`, `.cursor/skills`. The installer writes once to `~/.config/agents/skills/` (the cross-CLI XDG path) and `cli_has_agents crush` returns false. Same thin-stub caveat as Pi applies — skills whose bodies call the Agent tool will fail at runtime in Crush.
 
-**Flat-only agent shape for OpenCode / Kilo / Gemini.** Those three CLIs recursively scan their `agents/` directory and register every `.md` file as an agent — including bundled `references/*.md`, which then surface as broken namespaced agents. To avoid that, the renderers for those CLIs **inline bundled references into the agent body** (via `_lib.sh::inline_references`) and the installer always writes them as flat `<name>.md` files. Claude and Codex preserve directory form because they don't have the same scanning trap.
+**Flat-only agent shape for OpenCode / Kilo / Gemini / Antigravity.** Those four CLIs recursively scan their `agents/` directory and register every `.md` file as an agent — including bundled `references/*.md`, which then surface as broken namespaced agents. To avoid that, the renderers for those CLIs **inline bundled references into the agent body** (via `_lib.sh::inline_references`) and the installer always writes them as flat `<name>.md` files. Claude and Codex preserve directory form because they don't have the same scanning trap. Antigravity inherits this behavior from Gemini because they share a core agent engine.
+
+**Antigravity inherits Gemini's agent engine.** Per the official `google-antigravity/antigravity-cli` README, *"Both interfaces run on the same core agent engine."* In practice that means the frontmatter schema, the tool-name registry (`run_shell_command`, `read_file`, `replace`, `grep_search`, `glob`, `activate_skill`, `invoke_agent`, …), and the template-placeholder validator are all shared. The Antigravity renderer (`agents/renderers/agy.sh`) reuses the gemini-specific helpers in `_lib.sh` rather than duplicating them. If Antigravity's engine ever diverges, fork the helpers; until then, anything that fixes a load-bearing detail for Gemini fixes it for Antigravity too.
+
+**Antigravity directory layout (verified 2026-05-19 against a working `agy` install).** Antigravity literally lives *under* `~/.gemini/`:
+
+- Agents — `~/.gemini/antigravity-cli/agents/<name>.md`. **Not** `~/.antigravity/agents/` — that path belongs to the **Antigravity desktop app** and the CLI ignores it.
+- Skills — `~/.gemini/antigravity-cli/skills/` AND `~/.gemini/skills/` are read. The CLI documentation claims `~/.agents/skills/` is also read but in practice it currently does not surface; the installer pins agy's skills to `~/.gemini/antigravity-cli/skills/` to work around that until it's fixed.
+- Per-repo dir — the installer assumes `<repo>/.gemini/antigravity-cli/` to match the global pattern but this is **extrapolated, not verified**. Confirm against a real per-repo install before relying on it.
 
 ## Skill anatomy
 

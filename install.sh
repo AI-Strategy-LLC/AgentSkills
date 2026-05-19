@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — install AgentSkills' global-scope artifacts for one or more
-# AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI).
+# AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI,
+# Antigravity CLI).
 #
 # Usage (one-liner — no clone required):
 #   curl -fsSL https://raw.githubusercontent.com/AI-Strategy-LLC/AgentSkills/main/install.sh | bash -s -- --for claude
@@ -67,7 +68,7 @@ fi
 REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
 REF="${AGENT_SKILLS_REF:-release}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
-FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini
+FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,agy
 FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path to source tree (skips fetch)
 ACTION="install"
 ASSUME_YES=0
@@ -82,7 +83,7 @@ CP_EXPLICIT=0                                          # user passed at least on
 
 MANIFEST_NAME="installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor crush"
+SUPPORTED_CLIS="claude opencode kilo codex gemini agy pi cursor crush"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -98,7 +99,8 @@ Required:
                         opencode   → ~/.config/opencode/
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
-                        gemini     → ~/.gemini/
+                        gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
+                        agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — replaces Gemini CLI; shares the ~/.gemini/ root)
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
                         crush      → ~/.config/crush/ (skills only — Crush agents live in crush.json)
@@ -212,6 +214,11 @@ cli_root() {
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
         gemini)   printf '%s/.gemini' "$HOME" ;;
+        # Antigravity CLI deliberately nests under ~/.gemini/ — the two CLIs
+        # share a core agent engine and the same on-disk root. agy reads
+        # agents from ~/.gemini/antigravity-cli/agents/, NOT from a top-level
+        # ~/.antigravity/ (that path belongs to the Antigravity desktop app).
+        agy)      printf '%s/.gemini/antigravity-cli' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
         crush)    printf '%s/crush' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
@@ -273,9 +280,17 @@ cli_skills_dir() {
     case "$cli" in
         claude)                                 bucket=".claude/skills" ;;
         opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        # Antigravity reads ~/.gemini/antigravity-cli/skills/ AND ~/.gemini/
+        # skills/ AND (per its docs) ~/.agents/skills/ — but the last one
+        # currently doesn't surface skills in practice. Pin to the agy-
+        # specific path so the install is guaranteed to work today. Move
+        # this back to ~/.agents/skills/ once Google fixes the shared-dir
+        # bug (and a single physical copy will then cover every flat-form
+        # CLI again).
+        agy)                                    bucket=".gemini/antigravity-cli/skills" ;;
         # Crush scans $XDG_CONFIG_HOME/agents/skills (XDG-rooted) rather than
         # $HOME/.agents/skills (HOME-dot-prefixed) that the other CLIs use, so
-        # it gets a distinct third dedup bucket. Source:
+        # it gets a distinct dedup bucket. Source:
         # charmbracelet/crush internal/config/load.go GlobalSkillsDirs().
         crush)                                  bucket=".config/agents/skills" ;;
         *) die "unknown CLI: $cli" ;;
@@ -315,10 +330,11 @@ prompt_for_clis() {
         echo "  2) opencode  → ~/.config/opencode/"
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
-        echo "  5) gemini    → ~/.gemini/"
-        echo "  6) pi        → ~/.pi/agent/    (skills only)"
-        echo "  7) cursor    → ~/.cursor/      (rules-as-MDC)"
-        echo "  8) crush     → ~/.config/crush/ (skills only)"
+        echo "  5) gemini    → ~/.gemini/                  (deprecated for consumers after 2026-06-18)"
+        echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — replaces Gemini CLI; nests under ~/.gemini/)"
+        echo "  7) pi        → ~/.pi/agent/                 (skills only)"
+        echo "  8) cursor    → ~/.cursor/                   (rules-as-MDC)"
+        echo "  9) crush     → ~/.config/crush/             (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -334,10 +350,11 @@ prompt_for_clis() {
             3) mapped="${mapped:+$mapped,}kilo" ;;
             4) mapped="${mapped:+$mapped,}codex" ;;
             5) mapped="${mapped:+$mapped,}gemini" ;;
-            6) mapped="${mapped:+$mapped,}pi" ;;
-            7) mapped="${mapped:+$mapped,}cursor" ;;
-            8) mapped="${mapped:+$mapped,}crush" ;;
-            claude|opencode|kilo|codex|gemini|pi|cursor|crush) mapped="${mapped:+$mapped,}$t" ;;
+            6) mapped="${mapped:+$mapped,}agy" ;;
+            7) mapped="${mapped:+$mapped,}pi" ;;
+            8) mapped="${mapped:+$mapped,}cursor" ;;
+            9) mapped="${mapped:+$mapped,}crush" ;;
+            claude|opencode|kilo|codex|gemini|agy|pi|cursor|crush) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
@@ -481,7 +498,7 @@ agent_is_dir_form() {
 # problem.
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|cursor) return 0 ;;
+        opencode|kilo|gemini|agy|cursor) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -535,7 +552,7 @@ list_install_set() {
         fi
     done
 
-    # Note: opencode/kilo/gemini share ~/.agents/skills/ — listed per CLI
+    # Note: opencode/kilo/gemini/agy share ~/.agents/skills/ — listed per CLI
     # above for clarity, but install.sh writes that directory only once.
 
     if [ -n "$CP_BLOCK_MODE" ] || [ "$CP_HOOKS_INSTALL" = 1 ]; then
@@ -582,8 +599,8 @@ install_cli() {
 
     # Note: skills are installed by install_skills_dedup() in the main loop,
     # not here. Each CLI's skills directory is computed by cli_skills_dir,
-    # and opencode/kilo/gemini share ~/.agents/skills/ — installing per-CLI
-    # would write that directory three times. The dedup helper writes each
+    # and opencode/kilo/gemini/agy share ~/.agents/skills/ — installing per-CLI
+    # would write that directory four times. The dedup helper writes each
     # unique skills directory exactly once.
 
     # agents: render every base agent through this CLI's renderer.
@@ -1169,7 +1186,11 @@ case "$ACTION" in
         cp_validate_extras
 
         echo "AgentSkills installer"
-        echo "  source : $REPO @ $REF"
+        if [ -n "$FROM_LOCAL" ]; then
+            echo "  source : $FROM_LOCAL (local — --from)"
+        else
+            echo "  source : $REPO @ $REF"
+        fi
         echo "  CLIs   : $CLIS"
         if [ -n "$DEST" ]; then
             echo "  dest   : $DEST (override)"
@@ -1208,7 +1229,7 @@ case "$ACTION" in
             install_cli "$cli"
         done
 
-        # Skills install once per unique physical path (opencode/kilo/gemini
+        # Skills install once per unique physical path (opencode/kilo/gemini/agy
         # all share ~/.agents/skills/).
         echo "Installing skills …"
         install_skills_dedup | while read -r installed_path; do
@@ -1236,7 +1257,11 @@ case "$ACTION" in
         kilo_defensive_setup
 
         echo
-        echo "✓ Installed AgentSkills ($REPO@$REF) for: $CLIS"
+        if [ -n "$FROM_LOCAL" ]; then
+            echo "✓ Installed AgentSkills from $FROM_LOCAL (local) for: $CLIS"
+        else
+            echo "✓ Installed AgentSkills ($REPO@$REF) for: $CLIS"
+        fi
         echo "  Manifest: $MPATH"
         echo
         echo "Next steps:"
