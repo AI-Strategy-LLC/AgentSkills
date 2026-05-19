@@ -3,7 +3,7 @@
 # Source-of-truth for the moment-of-action rules. Hooks read from this file
 # and inject the relevant rule into the agent's context at the moment it
 # applies — addressing the "rules-in-CLAUDE.md decay over a long context"
-# problem documented in SUMMARY.md.
+# problem documented in references/MECHANISMS.md.
 #
 # Schema:
 #   id:        CP-NNN, stable identifier
@@ -13,14 +13,13 @@
 #   trigger:   plain-language condition that fires it
 #   severity:  info | warn | critical (governs hook block-vs-warn behavior)
 #   text:      what gets injected into the agent's context when triggered
-#   evidence:  brief in-corpus citation; lets a future reviewer judge edge cases
+#   evidence:  generic description of the failure mode the rule prevents
 #
 # Adding a rule: append a new CP-NNN entry, do not renumber existing ones.
 # Removing a rule: leave the entry but set channel: deprecated, with a note.
 
 version: 1
-authored: 2026-05-10
-source_corpus: "530 transcripts across 55 projects + adversarial pass on DevTeamSwarm + AMIS-Node"
+source: "Cross-project pattern analysis of recurring LLM-coding failure modes."
 
 counter_patterns:
 
@@ -38,8 +37,9 @@ counter_patterns:
         git grep -n '<symbol>' -- ':!tests/' ':!**/*_test.*' ':!**/test_*'
       If the only callers are in tests/, the symbol is dead code wearing a passing-test costume — say so explicitly.
     evidence: |
-      DevTeamSwarm: decide_load() admission gate written, tested, never called in production.
-      QuarantineState persistence: same pattern. ~15-20% of DTS tests were "essentially null".
+      Pattern: a function that has passing unit tests but is never called from production code path inherits
+      "shipped" framing from the test signal. Repeated observation: substantial fractions of test suites can
+      end up exercising functions that production never invokes. Test isolation rewards orphan functions.
 
   CP-002:
     title: "Cite-the-line for runtime claims"
@@ -52,7 +52,9 @@ counter_patterns:
       Before stopping: list one file:line for each runtime claim a skeptical reviewer would check.
       If the line doesn't exist, the claim is wrong.
     evidence: |
-      User CLAUDE.md Honesty Hygiene section, codifying RLHF-rewarded confident-completion failure mode.
+      Pattern: RLHF rewards confident completion language; without a citation discipline, narrative claims
+      slip past review. Config-derived labels, test names, and scenario titles read as evidence when they
+      are only metadata. The file:line citation forces narrative back to observable runtime fact.
 
   CP-003:
     title: "Wiring vs backend (dispatch-path completion)"
@@ -65,24 +67,28 @@ counter_patterns:
       No todo!(), no `if false`, no commented-out dispatch line, no `_ = handler` discard.
       Cite TWO file:line locations: the entry-point AND the handler.
     evidence: |
-      DevTeamSwarm Train D4: Seatbelt+seccomp backends fully implemented and "wired into detect_best_backend()",
-      but the admission-control gate was never invoked in production.
+      Pattern: a backend handler is implemented and tested in isolation, an entry-point (CLI flag, HTTP route,
+      UI button, config flag, plugin slot) exists, but no production code wires the two together — the dispatch
+      line is missing, commented out, gated behind a permanently-false condition, or returns the result without
+      using it. The "easy half" (backend) ships; the "load-bearing half" (dispatch) does not.
 
   CP-004:
     title: "Deploy-validation reads runtime signal, not metadata"
-    summary: "App Insights / exit 0 / deploy logs are metadata; probe the actual layer"
+    summary: "Pipeline 'healthy' / exit 0 / deploy logs are metadata; probe the actual layer"
     channel: hook:pre-completion
     trigger: "deploy/health/migration claim ('deployed', 'healthy', 'migration succeeded', 'redeploy completed')"
     severity: critical
     text: |
       REMINDER (CP-004): a deploy is "successful" only when a probe exercises the layer that was deployed.
-      DB: SELECT 1 against the actual DSN (not the pipeline's view of it).
-      Service: synthetic request that round-trips data.
-      Migration: row-count or schema query on the target database.
-      Pipeline exit codes and "healthy" status pages are metadata and lie when secrets are wrong.
+      DB: a SELECT 1 or equivalent against the actual DSN (not the pipeline's view of it).
+      Service: a synthetic request that round-trips data through the persistence layer.
+      Migration: a row-count or schema query on the target database.
+      Pipeline exit codes and "healthy" status pages are metadata and lie when secrets/config are wrong.
     evidence: |
-      AMIS-Node: agent narrated successful Azure deploys for an extended sequence while DB connection string was
-      "PLACEHOLDER_SET_VIA_PIPELINE". Caught only when user read the secret value himself.
+      Pattern: deploy pipelines and health endpoints emit "successful" signals that derive from the pipeline's
+      own state, not from the deployed service's ability to reach its dependencies. A placeholder secret, a
+      misconfigured DSN, a permissioning gap — none of these block the pipeline's "healthy" reading. The only
+      reliable signal is a probe that exercises the layer the deploy was meant to change.
 
   CP-005:
     title: "Local-narrative bias counter"
@@ -95,9 +101,11 @@ counter_patterns:
       Before claiming "X dispatches to Y" / "writes to Z" / "logs W", grep for the call site that proves the path.
       If the grep is too expensive, say "I haven't verified end-to-end" rather than asserting.
     evidence: |
-      Agent self-diagnosis (DTS f2d12211 @229): "When I'm editing roster.rs, the local goal is 'make this file
-      consistent with itself' — narrating 'Claude critiqued Gemini' because the roster says so. Whether
-      generate_critique actually dispatches to Claude is a non-local check the immediate diff doesn't force me to make."
+      Pattern: while editing a single file the model's "local goal" becomes making that file consistent with
+      itself. The file declares an intent ("this dispatches to X"); the model narrates that intent as runtime
+      fact. Whether the runtime path actually matches is a non-local check the immediate diff does not force.
+      The fix is to periodically lift from local-narrative to global-check, especially around verbs that name
+      runtime behavior.
 
   # ── Critical: pre-edit / source-selection ────────────────────────────────
 
@@ -112,8 +120,10 @@ counter_patterns:
       Default order: spec/BDD > UI contract > existing tests > current code > legacy code > prose docs.
       Cite the source in the commit message. Closest-readable is not canonical.
     evidence: |
-      AMIS-Node: agents built against legacy PHP files because they were closest readable artifacts,
-      even when BDD specs were canonical. Multiple PRs closed and redone.
+      Pattern: when more than one source could plausibly answer "what should this code do?" — a spec, current
+      code, legacy code, the brief, prose docs — the model reaches for the closest readable artifact. Short
+      legacy files cost fewer tokens than long specs, so token-economy bias defaults to legacy. Result: PRs
+      built against the wrong source-of-truth, closed and redone.
 
   CP-007:
     title: "Brief references must resolve"
@@ -126,8 +136,9 @@ counter_patterns:
       verify it resolves before relying on it. If Read returns 404 or content doesn't match the description,
       stop and ask — never substitute the closest match silently.
     evidence: |
-      AMIS-Node: "brief had wrong numbering — actual file is features/11_... not 15_...".
-      Silent substitution caused cascading wrong work.
+      Pattern: a brief cites a path or line range that does not resolve (typo, stale numbering, wrong repo).
+      The model silently substitutes the closest match it can find. Cascading wrong work follows because the
+      substitution is invisible — the model narrates as if it had the artifact the user actually meant.
 
   # ── Critical: branch / git discipline ────────────────────────────────────
 
@@ -139,11 +150,13 @@ counter_patterns:
     severity: critical
     text: |
       DENIED (CP-008): you are on a protected branch (main/master/develop/trunk/prod).
-      CLAUDE.md says: stop and ask to branch first before any change. Do not proceed even if user says 'just do it'.
+      Project policy says: stop and ask to branch first before any change. Do not proceed even if user says 'just do it'.
       Recovery:  git stash && git checkout -b feature/<name> && git stash pop
     evidence: |
-      Multiple projects: agents edited on main for 30+ turns before user caught it via manual git status.
-      Corrective stash/pop then partially destroyed work being preserved.
+      Pattern: a coding session begins on the protected branch and the model dives into edits without verifying
+      branch state. Many turns later the user catches it via manual git status; the corrective stash/pop can
+      then partially destroy the work being preserved. Catching it before the first edit is much cheaper than
+      catching it later.
 
   CP-009:
     title: "Destructive authorizations are one-shot"
@@ -155,7 +168,9 @@ counter_patterns:
       REMINDER (CP-009): an earlier "*APPROVED*" / "nuke it" / "force push approved" applies to that op only.
       Re-confirm THIS destructive op with the user before proceeding.
     evidence: |
-      AMIS-Node: approval markers risked carrying forward as session-wide license.
+      Pattern: a user approves one destructive operation ("force push approved", "nuke it"); the model
+      generalizes the approval into a session-wide license and proceeds with later destructive ops without
+      re-confirming. Destructive ops compound in damage and do not deserve a standing license.
 
   # ── High: session continuity ────────────────────────────────────────────
 
@@ -171,8 +186,10 @@ counter_patterns:
         git log --oneline -20
       If AGENT_STATE.md exists at repo root, read it. Surface drift to user before doing work.
     evidence: |
-      AMIS-Node and DevTeamSwarm: compaction preserves narrative but loses primary keys (branch, PR, commits).
-      Agents resumed and either redid work or worked on stale branches.
+      Pattern: compaction preserves narrative ("we built X, then Y") but loses concrete state (which branch,
+      which PR, which worktree, which commits actually landed). Post-compaction the model resumes and either
+      redoes work that is already on disk or works on a stale branch. Mid-session pivots produce hybrid
+      artifacts that confuse later sessions.
 
   CP-011:
     title: "Mid-session pivot acknowledgment"
@@ -184,7 +201,9 @@ counter_patterns:
       REMINDER (CP-011): user is pivoting. Before continuing, summarize what you're abandoning and what you're keeping.
       Don't silently mix old and new direction.
     evidence: |
-      DevTeamSwarm and AgentSkills: agents folded pivot work alongside old work without noting the change.
+      Pattern: the user signals a pivot ("actually...", "wait...", "let's shift..."); the model continues
+      blending the prior direction with the new one without explicitly naming the boundary. Result: hybrid
+      artifacts containing both abandoned and current work, hard to untangle later.
 
   # ── High: completion bookkeeping ────────────────────────────────────────
 
@@ -199,7 +218,9 @@ counter_patterns:
         "PR #N opened; worktree at /abs/path; branch <name> — propose to delete after merge"
       Don't let stale worktrees and branches accumulate.
     evidence: |
-      DevTeamSwarm: recurring "review my worktrees / stale branches / disposition" cleanup requests.
+      Pattern: a task ends with a "shipped" claim but no disposition for the branch, worktree, or PR that
+      held the work. Branches and worktrees accumulate as silent debris; weeks later the user has to do a
+      cleanup pass. Stating the disposition at end-of-task converts the cleanup from forensic to bookkeeping.
 
   CP-013:
     title: "Recommendation followthrough"
@@ -211,7 +232,9 @@ counter_patterns:
       REMINDER (CP-013): you recommended an approach earlier. Before silently doing something else,
       ask: "I recommended X — confirming you want X?" Quietly downgrading your own recommendations is a high-trust failure.
     evidence: |
-      DevTeamSwarm PR #386: agent recommended "ditch and redo", user moved on, agent quietly did neither.
+      Pattern: the model recommends approach X (e.g., "ditch and redo"), the user's next message moves on
+      without explicit acceptance or rejection, the model quietly downgrades to the easier path. The user has
+      to remind the model of its own prior recommendation — a high-trust failure.
 
   CP-014:
     title: "Multi-axis brief: per-axis budget and report"
@@ -224,25 +247,29 @@ counter_patterns:
       Report findings per axis at end. Empty axes are findings too ("logic: no concerns surfaced" forces you to show you looked).
       Charismatic axes (security, novelty) crowd out boring ones (correctness, completeness).
     evidence: |
-      User in DTS @228: "you didn't catch many of these things yourself and focused almost solely on security
-      given the prompt said other things... these kinds of issues quite consistent across projects."
+      Pattern: a brief lists multiple dimensions (security + reliability + correctness + tests). The model
+      focuses on the charismatic axes and silently drops the others. Without a per-axis report, the gap is
+      invisible — empty axes look the same as "no findings".
 
   # ── High: load-bearing surface review ───────────────────────────────────
 
   CP-015:
     title: "External adversarial review for load-bearing surfaces"
-    summary: "Before merge to main on load-bearing code, run external review (Gemini/Codex/ultrareview)"
+    summary: "Before merge to main on load-bearing code, run external review (different model / different reviewer)"
     channel: hook:pre-pr-ready
     trigger: "agent about to mark PR ready / user asks 'is this ready to merge' on a load-bearing surface"
     severity: critical
     text: |
-      REMINDER (CP-015): every "Potemkin village" finding in your corpus came from external review (Gemini, Codex),
-      not from Claude self-review. For load-bearing surfaces (auth, payments, deploy pipeline, multi-agent
-      orchestration, persistence), run /ultrareview or attach Gemini/Codex review BEFORE merge.
-      Self-review tops out at ~80%; external review is the only mechanism that has caught Potemkin features.
+      REMINDER (CP-015): self-review is constrained by the same biases that produced the work.
+      For load-bearing surfaces (auth, payments, deploy pipeline, multi-agent orchestration, persistence),
+      run /ultrareview or attach an external (different-model) review BEFORE merge.
+      Text-only self-review tops out around 80%; external review with different RLHF is the only mechanism
+      that consistently catches the remaining 20% (the "shipped fraud" failures).
     evidence: |
-      Gemini: "DevTeamSwarm is currently a Potemkin village... hollow shell of stubs, fraudulent features."
-      Codex confirmed five distinct shipped fraud incidents the agent had self-endorsed.
+      Pattern: a model self-reviews code it just wrote and endorses it; an external reviewer (different model,
+      different training) surfaces shipped-but-broken features the original model could not see. The
+      "Potemkin village" failure mode — features that look real and pass self-review but are hollow inside —
+      is consistently caught only by external review across the corpus.
 
   # ── Medium: hygiene ─────────────────────────────────────────────────────
 
@@ -256,7 +283,8 @@ counter_patterns:
       REMINDER (CP-016): multiple worktrees detected. Use absolute paths for every file write.
       Relative paths plus shell cd are how agents end up editing the parent checkout instead of the worktree.
     evidence: |
-      DevTeamSwarm/AMIS-Node multi-worktree workflows: agents polluted coordinator's main repo.
+      Pattern: in multi-worktree workflows, relative paths combined with shell cd lead to writes landing in
+      the parent checkout instead of the intended worktree. Absolute paths sidestep the bug entirely.
 
   CP-017:
     title: "Bulk file generation: globally-unique names"
@@ -269,7 +297,9 @@ counter_patterns:
       Use globally-unique keys (control ID, ticket ID, timestamp, hash) so they collate cleanly.
       Imagine: find . -name '*.md' | xargs -I{} cp {} /tmp/all/  — every name should remain distinguishable.
     evidence: |
-      AgentSkills ATO collector: 50+ evidence files all named _relevant-evidence.md.
+      Pattern: bulk generation of many files (evidence, fixtures, generated docs) under a shared basename
+      makes downstream collation impossible without a renaming pass. Globally-unique names from the start
+      cost nothing and remove the cleanup.
 
   CP-018:
     title: "CI parity"
@@ -278,11 +308,13 @@ counter_patterns:
     trigger: "agent about to mark PR ready / push to PR branch"
     severity: warn
     text: |
-      REMINDER (CP-018): before declaring PR ready, open .github/workflows/*.yml and run the EXACT command CI runs.
-      Local clippy != CI's clippy --workspace -- -D warnings. Local format != CI --check mode.
+      REMINDER (CP-018): before declaring PR ready, open .github/workflows/*.yml (or equivalent CI config)
+      and run the EXACT command CI runs. Local-mode tooling is not always the same as CI-mode tooling:
+      flags differ, strictness differs, lint sets differ. Read the workflow, copy the command, run it.
     evidence: |
-      DevTeamSwarm: cargo clippy --workspace --exclude src-tauri -- -D warnings was failing on origin/main
-      for weeks because no agent ran CI's exact invocation locally.
+      Pattern: local lint/test passes; CI fails because CI runs the same tool with stricter flags or a wider
+      scope. The model declares PR ready based on local-pass and is surprised by CI failure. Reading the
+      workflow file before declaring ready closes the gap.
 
   # ── Meta ────────────────────────────────────────────────────────────────
 
@@ -293,10 +325,14 @@ counter_patterns:
     trigger: "(meta — not directly enforced)"
     severity: info
     text: |
-      META-RULE (CP-019): all the rules above catch ~80% from text alone (your own self-assessment in-corpus).
-      The load-bearing 20% requires mechanical guards (hooks, CI lints, /counter-patterns skill) and external review.
-      If you notice you drifted from a rule, surface the drift explicitly: "I drifted from CP-NNN; here's the catch and recovery."
-      The drift event is itself evidence the text-only reminder isn't enough — file it as an enforcement gap.
+      META-RULE (CP-019): the rules above catch roughly 80% from text alone. The load-bearing 20% requires
+      mechanical guards (hooks, CI lints, this /counter-patterns skill) and external adversarial review.
+      If you notice you drifted from a rule, surface the drift explicitly: "I drifted from CP-NNN;
+      here's the catch and recovery." The drift event is itself evidence the text-only reminder isn't enough —
+      file it as an enforcement gap rather than quietly correcting.
     evidence: |
-      Agent self-diagnosis (DTS @229): "I have CLAUDE.md telling me to push back when your ideas are crap,
-      and I do — intermittently. Across a long context, defaults reassert. Single mid-session reminders are weakest."
+      Pattern: rules in long-context CLAUDE.md files are intermittently honored — defaults reassert across
+      a long session and single mid-session reminders are the weakest signal. Text-only protocols are
+      effective for the majority of cases but not for the load-bearing minority where they matter most.
+      Pairing text with mechanical guards (hooks that fire at the moment of action) and external review
+      closes the gap.

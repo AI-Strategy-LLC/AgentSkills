@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# PreToolUse hook — block Edit/Write/Bash-git-commit on protected branches.
+# PreToolUse hook (CP-008) — block Edit/Write/Bash-git-write on protected branches.
 # Returns exit code 2 with stderr message to deny the tool call.
 # Returns exit code 0 to allow.
+#
+# Env vars (optional):
+#   CP_PROTECTED_BRANCHES   Space-separated list of protected branch names.
+#                           Default: "main master develop trunk prod production"
 
 set -euo pipefail
 
-# Stdin: JSON envelope. Fields: .tool_name, .tool_input
 PAYLOAD=$(cat)
 TOOL=$(echo "$PAYLOAD" | jq -r '.tool_name // ""')
 
-# We only care about Edit, Write, NotebookEdit, and Bash with git commit/push
 case "$TOOL" in
   Edit|Write|NotebookEdit) ;;
   Bash)
     CMD=$(echo "$PAYLOAD" | jq -r '.tool_input.command // ""')
-    # Allow read-only git ops; block writes
     if ! echo "$CMD" | grep -qE '\bgit (commit|push|merge|reset --hard|rebase|cherry-pick)\b'; then
       exit 0
     fi
@@ -28,18 +29,23 @@ if ! git -C "$CWD" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 BRANCH=$(git -C "$CWD" branch --show-current 2>/dev/null || true)
-case "$BRANCH" in
-  main|master|develop|trunk|prod|production)
+PROTECTED="${CP_PROTECTED_BRANCHES:-main master develop trunk prod production}"
+
+for p in $PROTECTED; do
+  if [[ "$BRANCH" == "$p" ]]; then
     cat >&2 <<EOF
-DENIED by counter-patterns branch guard.
+DENIED by counter-patterns branch guard (CP-008).
 
 You are on protected branch '$BRANCH' and attempted: $TOOL.
-CLAUDE.md says: NEVER commit or push new work directly to main. Stop and ask to branch first.
+Policy: never commit or push new work directly to a protected branch. Stop and ask the user to branch first.
 
-To proceed: ask the user, then create a feature branch:
+To proceed: confirm with the user, then create a feature branch:
   git stash && git checkout -b feature/<name> && git stash pop
+
+Configure protected branch names via the CP_PROTECTED_BRANCHES env var if needed.
 EOF
     exit 2
-    ;;
-esac
+  fi
+done
+
 exit 0

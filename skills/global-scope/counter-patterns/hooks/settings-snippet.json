@@ -1,0 +1,50 @@
+{
+  "_comment_": "Counter-patterns hook additions for Claude Code's settings.json. Merge the 'hooks' block below into your existing settings.json — do not overwrite (any existing hooks must be preserved). The HOOKS_DIR placeholder (dollar-brace form in this template) is rewritten by install-hooks.sh; if you install manually, replace it with the absolute path to the hooks directory (typically ~/.claude/hooks).",
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "${HOOKS_DIR}/session-start-primer.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "${HOOKS_DIR}/user-prompt-resume-detect.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "command": "${HOOKS_DIR}/pre-tool-branch-guard.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "${HOOKS_DIR}/pre-completion.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
