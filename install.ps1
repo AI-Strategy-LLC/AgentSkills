@@ -18,7 +18,7 @@
 
 .PARAMETER For
     Comma-separated list of CLIs to install for. Any of:
-    claude, opencode, kilo, codex, gemini, pi, cursor.
+    claude, opencode, kilo, codex, gemini, agy, pi, cursor.
     If omitted, the bash installer prompts in TTY mode (or errors in non-TTY).
 
 .PARAMETER Ref

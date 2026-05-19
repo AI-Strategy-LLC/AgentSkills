@@ -64,7 +64,7 @@ fi
 REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
 REF="${AGENT_SKILLS_REF:-main}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
-FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,pi
+FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,agy,pi
 FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path containing ato/ (or being the ato/ folder)
 ACTION="install"
 ASSUME_YES=0
@@ -72,7 +72,7 @@ KEEP_CACHE=""
 
 MANIFEST_NAME="ato-installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini pi cursor"
+SUPPORTED_CLIS="claude opencode kilo codex gemini agy pi cursor"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -88,7 +88,8 @@ Required:
                         opencode   → ~/.config/opencode/
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
-                        gemini     → ~/.gemini/
+                        gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
+                        agy        → ~/.antigravity/ (Antigravity CLI — replaces Gemini CLI)
                         pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
                         cursor     → ~/.cursor/     (rules-as-MDC)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
@@ -168,6 +169,7 @@ cli_root() {
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
         gemini)   printf '%s/.gemini' "$HOME" ;;
+        agy)      printf '%s/.antigravity' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
         *) die "unknown CLI: $cli" ;;
@@ -201,15 +203,15 @@ cli_agents_subdir() {
     esac
 }
 
-# Same dedup rule as the main installer: opencode/kilo/gemini/codex/pi all
+# Same dedup rule as the main installer: opencode/kilo/gemini/agy/codex/pi all
 # auto-discover ~/.agents/skills/, so we install once into that shared
 # location. Claude is the only CLI that doesn't scan ~/.agents/, so it gets
 # its own ~/.claude/skills/.
 cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
-        claude)                                 bucket=".claude/skills" ;;
-        opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        claude)                                   bucket=".claude/skills" ;;
+        opencode|kilo|gemini|agy|codex|pi|cursor) bucket=".agents/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$bucket"
@@ -243,9 +245,10 @@ prompt_for_clis() {
         echo "  2) opencode  → ~/.config/opencode/"
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
-        echo "  5) gemini    → ~/.gemini/"
-        echo "  6) pi        → ~/.pi/agent/   (skills only)"
-        echo "  7) cursor    → ~/.cursor/     (rules-as-MDC)"
+        echo "  5) gemini    → ~/.gemini/         (deprecated for consumers after 2026-06-18)"
+        echo "  6) agy       → ~/.antigravity/    (Antigravity CLI — replaces Gemini CLI)"
+        echo "  7) pi        → ~/.pi/agent/       (skills only)"
+        echo "  8) cursor    → ~/.cursor/         (rules-as-MDC)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -260,9 +263,10 @@ prompt_for_clis() {
             3) mapped="${mapped:+$mapped,}kilo" ;;
             4) mapped="${mapped:+$mapped,}codex" ;;
             5) mapped="${mapped:+$mapped,}gemini" ;;
-            6) mapped="${mapped:+$mapped,}pi" ;;
-            7) mapped="${mapped:+$mapped,}cursor" ;;
-            claude|opencode|kilo|codex|gemini|pi|cursor) mapped="${mapped:+$mapped,}$t" ;;
+            6) mapped="${mapped:+$mapped,}agy" ;;
+            7) mapped="${mapped:+$mapped,}pi" ;;
+            8) mapped="${mapped:+$mapped,}cursor" ;;
+            claude|opencode|kilo|codex|gemini|agy|pi|cursor) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
@@ -403,7 +407,7 @@ agent_is_dir_form() {
 
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|cursor) return 0 ;;
+        opencode|kilo|gemini|agy|cursor) return 0 ;;
         *) return 1 ;;
     esac
 }

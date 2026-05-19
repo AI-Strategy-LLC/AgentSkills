@@ -1,6 +1,6 @@
 ---
 name: skill-interview
-description: "Greenfield project setup: interview the user via AskUserQuestion about the intended AI CLIs (Claude Code, OpenCode, Kilo Code, Codex, Gemini), languages, test frameworks, deployment targets, and compliance/workflow requirements for a new repo, then delegate to `skill-sync` to install the matching subset into each CLI's per-repo directory. Use when starting a fresh repo that has no code yet — for existing repos, use `skill-sync` directly (its detection is more accurate than any interview)."
+description: "Greenfield project setup: interview the user via AskUserQuestion about the intended AI CLIs (Claude Code, OpenCode, Kilo Code, Codex, Gemini, Antigravity), languages, test frameworks, deployment targets, and compliance/workflow requirements for a new repo, then delegate to `skill-sync` to install the matching subset into each CLI's per-repo directory. Use when starting a fresh repo that has no code yet — for existing repos, use `skill-sync` directly (its detection is more accurate than any interview)."
 ---
 
 # Skill Interview
@@ -27,7 +27,7 @@ Use the `AskUserQuestion` tool. Group related questions into a single call (mult
 
 **Required questions** (always ask):
 
-1. **Target AI CLIs.** Multi-select from: Claude Code, OpenCode, Kilo Code, Codex (OpenAI), Gemini CLI. If the user has previously run `install.sh` and `~/.agent-skills/installer-manifest.json` exists, pre-fill the answer with the `clis` array from that file and let the user edit down. Stored in `<repo>/.skill-sync.yaml` as `target_clis:` — `skill-sync` will configure each CLI's per-repo directory (`.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/`).
+1. **Target AI CLIs.** Multi-select from: Claude Code, OpenCode, Kilo Code, Codex (OpenAI), Gemini CLI, Antigravity CLI (`agy`). If the user has previously run `install.sh` and `~/.agent-skills/installer-manifest.json` exists, pre-fill the answer with the `clis` array from that file and let the user edit down. Stored in `<repo>/.skill-sync.yaml` as `target_clis:` — `skill-sync` will configure each CLI's per-repo directory (`.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/`, `.antigravity/`).
 2. **Primary language(s).** Multi-select from: Rust, Swift, Python, TypeScript, JavaScript, Kotlin, Java, C#, C, C++, Go, Ruby, PHP, R, SAS, Perl, SQL, Objective-C, Other (free-text).
 3. **Testing intensity.** Single-select: (a) No tests initially, (b) Smoke tests only, (c) Full unit + integration, (d) TDD / BDD (Gherkin).
 4. **Deployment target.** Multi-select: iOS, macOS, Android, Windows desktop, Linux desktop, Docker container, Node web app, Python web app, Static site, Library package (no deploy), CLI binary, Other.

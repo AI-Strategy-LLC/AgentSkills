@@ -1,6 +1,6 @@
 ---
 name: skill-sync
-description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .pi/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) is skills-only — repo-scope skills install into <repo>/.agents/skills/ which Pi auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
+description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .antigravity/, .pi/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) is skills-only — repo-scope skills install into <repo>/.agents/skills/ which Pi auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
 ---
 
 # Skill Sync
@@ -38,13 +38,13 @@ agents/
       coverage-investigator/{agent.md, metadata.yaml}
       ato-artifact-collector/{agent.md, metadata.yaml, references/, evals/, config.yaml}
     repo-scope/      # empty today; reserved for future repo-scoped agents
-  renderers/         # one script per CLI (claude.sh, opencode.sh, kilo.sh, gemini.sh, codex.sh)
+  renderers/         # one script per CLI (claude.sh, opencode.sh, kilo.sh, gemini.sh, agy.sh, codex.sh)
     + codex-agents-md.sh for the Codex AGENTS.md inventory
 ```
 
-**Agent rendering.** `skill-sync` never copies `agents/base/<scope>/<name>/agent.md` verbatim. Instead, for each CLI in play, it pipes the base agent through `agents/renderers/<cli>.sh` to produce the CLI's native format (Markdown+YAML for Claude/OpenCode/Kilo/Gemini; TOML for Codex).
+**Agent rendering.** `skill-sync` never copies `agents/base/<scope>/<name>/agent.md` verbatim. Instead, for each CLI in play, it pipes the base agent through `agents/renderers/<cli>.sh` to produce the CLI's native format (Markdown+YAML for Claude/OpenCode/Kilo/Gemini/Antigravity; TOML for Codex). Antigravity (`agy`) reuses the Gemini renderer's helpers because the two CLIs share a core agent engine.
 
-**`skill-sync` only ever fetches from `skills/repo-scope/` and `agents/base/repo-scope/`.** The `global-scope/` subtrees are the responsibility of a separate one-time install (`install.sh`) — they are always available regardless of which repo the user is working in, so installing them per-repo would just duplicate them. Globally, `install.sh` writes skills to **at most two physical locations** regardless of how many CLIs are selected: `~/.claude/skills/` (Claude only) and `~/.agents/skills/` (shared by OpenCode + Kilo + Gemini + Codex, all of which auto-discover that path). Codex specifically also scans `~/.codex/skills/`, so writing there in addition would surface every skill twice — `install.sh` deliberately avoids that. Within `~/.<cli>/agents/`, each selected CLI gets its own rendered agents.
+**`skill-sync` only ever fetches from `skills/repo-scope/` and `agents/base/repo-scope/`.** The `global-scope/` subtrees are the responsibility of a separate one-time install (`install.sh`) — they are always available regardless of which repo the user is working in, so installing them per-repo would just duplicate them. Globally, `install.sh` writes skills to **at most two physical locations** regardless of how many CLIs are selected: `~/.claude/skills/` (Claude only) and `~/.agents/skills/` (shared by OpenCode + Kilo + Gemini + Antigravity + Codex, all of which auto-discover that path). Codex specifically also scans `~/.codex/skills/`, so writing there in addition would surface every skill twice — `install.sh` deliberately avoids that. Within `~/.<cli>/agents/`, each selected CLI gets its own rendered agents.
 
 A thin-stub skill in `skills/repo-scope/<name>/SKILL.md` may delegate to an agent in `agents/base/repo-scope/<name>/`. When a skill advertises an agent delegate, **both** are installed together; they are versioned as a pair and recorded as a pair in the manifest.
 
@@ -59,6 +59,7 @@ In the target repo, installs go under a per-CLI directory. The installer manifes
 | Kilo Code | `<repo>/.kilo/` | `.md` |
 | Codex | `<repo>/.codex/` | `.toml` |
 | Gemini CLI | `<repo>/.gemini/` | `.md` |
+| Antigravity CLI (`agy`) | `<repo>/.antigravity/` | `.md` |
 | Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (skills only — no agents) | — |
 
 For each selected CLI the install shape is:
@@ -73,7 +74,7 @@ For each selected CLI the install shape is:
 
 Codex additionally gets `<repo>/.codex/AGENTS.md` — an inventory of installed agents rendered via `agents/renderers/codex-agents-md.sh`.
 
-**Why skills are Claude-only per-repo for now.** Per-repo skill placement is still Claude-only here even though OpenCode, Kilo, Gemini, and Codex all support `SKILL.md` natively at the global tier — `install.sh` (global) handles them via the cross-scan compatibility paths (`~/.agents/skills/` for OpenCode/Kilo/Gemini, dedicated dirs for Claude/Codex). Per-repo skill scanning paths differ by CLI (e.g., `<repo>/.opencode/skills/` vs `<repo>/.kilo/skills/` vs `<repo>/.gemini/skills/`) and there is no equivalent shared `.agents/skills/` convention at the per-repo tier in every CLI. Until that lands consistently, repo-scope skills go to `.claude/skills/` only and other CLIs read repo-scope content via Claude's directory if they cross-scan it; otherwise per-CLI repo-scope skill placement should be added when there is a real need.
+**Why skills are Claude-only per-repo for now.** Per-repo skill placement is still Claude-only here even though OpenCode, Kilo, Gemini, Antigravity, and Codex all support `SKILL.md` natively at the global tier — `install.sh` (global) handles them via the cross-scan compatibility paths (`~/.agents/skills/` for OpenCode/Kilo/Gemini/Antigravity, dedicated dirs for Claude/Codex). Per-repo skill scanning paths differ by CLI (e.g., `<repo>/.opencode/skills/` vs `<repo>/.kilo/skills/` vs `<repo>/.gemini/skills/` vs `<repo>/.antigravity/skills/`) and there is no equivalent shared `.agents/skills/` convention at the per-repo tier in every CLI. Until that lands consistently, repo-scope skills go to `.claude/skills/` only and other CLIs read repo-scope content via Claude's directory if they cross-scan it; otherwise per-CLI repo-scope skill placement should be added when there is a real need.
 
 ## When to run
 
@@ -95,7 +96,7 @@ source:
   repo: your-org/ClaudeSkills           # GitHub owner/repo
   ref: main                             # branch, tag, or commit SHA (prefer a pinned tag)
 target_clis: []                         # optional. Empty = read from ~/.agent-skills/installer-manifest.json
-                                        # else comma-list of: claude, opencode, kilo, codex, gemini, pi
+                                        # else comma-list of: claude, opencode, kilo, codex, gemini, agy, pi
 allowlist: []                           # empty = every skill/agent in source is available
                                         # non-empty = only these directory names may be installed
 deny: []                                # always exclude these (takes precedence over allowlist)
@@ -114,7 +115,7 @@ auth:
    - If the user passed `--for <list>` on invocation, use that.
    - Else if config has `target_clis:` non-empty, use that.
    - Else read `~/.agent-skills/installer-manifest.json` and use the `clis` array from the most recent `install.sh` run.
-   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / gemini / pi".
+   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / gemini / agy / pi".
 3. If `auth.method: gh`, check `gh auth status` succeeds; if `ssh`, check `ssh -T git@github.com 2>&1 | grep -q 'successfully authenticated'`. If auth is missing, **stop** with an actionable message — do not prompt to store tokens.
 
 ### Step 2 — Detect the repo's toolchains and workflow signals
@@ -188,6 +189,7 @@ case "$cli" in
     kilo)     root="<repo>/.kilo" ;;
     codex)    root="<repo>/.codex" ;;
     gemini)   root="<repo>/.gemini" ;;
+    agy)      root="<repo>/.antigravity" ;;
     pi)       root="<repo>/.pi"  ;;  # Pi has no subagents — skills only (handled below)
 esac
 
@@ -292,7 +294,7 @@ Teams split on whether synced skills/agents should be committed (a team lead run
 
 Otherwise, ask via `AskUserQuestion` with two options:
 
-- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/` (as applicable) + manifest.
+- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/`, `.antigravity/` (as applicable) + manifest.
 - **Ignored** — Each developer runs `skill-sync` themselves; those directories + the manifest stay gitignored.
 
 **Apply `committed`:**
@@ -314,6 +316,7 @@ Otherwise, ask via `AskUserQuestion` with two options:
   .kilo/
   .codex/
   .gemini/
+  .antigravity/
   ```
 
 - Record `commit_policy: "ignored"` in the manifest.

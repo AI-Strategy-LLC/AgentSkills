@@ -1,6 +1,6 @@
 # AgentSkills
 
-A curated collection of **multi-CLI AI skills and agents** — drop-in capabilities for [Claude Code](https://docs.claude.com/claude-code), [OpenCode](https://opencode.ai), [Kilo Code](https://kilo.ai), [OpenAI Codex CLI](https://developers.openai.com/codex), and [Gemini CLI](https://geminicli.com). Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time; you pick which CLI(s) to install for.
+A curated collection of **multi-CLI AI skills and agents** — drop-in capabilities for [Claude Code](https://docs.claude.com/claude-code), [OpenCode](https://opencode.ai), [Kilo Code](https://kilo.ai), [OpenAI Codex CLI](https://developers.openai.com/codex), [Gemini CLI](https://geminicli.com), and [Antigravity CLI](https://antigravity.google/) (`agy`). Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time; you pick which CLI(s) to install for.
 
 The tree is split into **global-scope** (user-level, installed once per CLI into each CLI's global directory — available in every repo) and **repo-scope** (per-repo, installed by [`skill-sync`](skills/global-scope/skill-sync/SKILL.md) into each CLI's per-repo directory only when the toolchain matches). Instead of installing everything globally and hoping the harness picks the right one, repo-scope artifacts land only in the repos that actually need them.
 
@@ -14,7 +14,7 @@ agents/
   base/              # canonical agent source (CLI-agnostic: agent.md + metadata.yaml)
     global-scope/    # general-purpose agents
     repo-scope/      # 0 agents today; reserved
-  renderers/         # canonical per-CLI renderers: claude.sh, opencode.sh, kilo.sh, gemini.sh, codex.sh
+  renderers/         # canonical per-CLI renderers: claude.sh, opencode.sh, kilo.sh, gemini.sh, agy.sh, codex.sh
 install.sh           # all-in-one installer: --for <cli>[,<cli>...]
 ato/                 # ATO (NIST 800-53) collection — independently shareable subset
   skills/            # ATO skills (canonical) + auth-* mirrors (kept in sync)
@@ -44,6 +44,7 @@ The ATO collection lives under its own `ato/` subtree and ships with its own ded
 | Kilo Code | `~/.config/kilo/` | `<repo>/.kilo/` | `<name>.md` |
 | OpenAI Codex | `~/.codex/` | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` |
 | Gemini CLI | `~/.gemini/` | `<repo>/.gemini/` | `<name>.md` |
+| Antigravity CLI (`agy`) | `~/.antigravity/` | `<repo>/.antigravity/` | `<name>.md` (shares Gemini's agent engine) |
 | Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | _(skills only)_ |
 | Cursor | `~/.cursor/` | `<repo>/.cursor/` | `<name>.mdc` |
 
@@ -214,7 +215,7 @@ The PowerShell scripts use Git Bash (from Git for Windows) under the hood. If Gi
 curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/install.sh | bash -s -- --for claude,opencode,kilo
 ```
 
-What happens: the installer fetches the repo tarball at `main` (or whatever `--ref` you pass). For each CLI in `--for`, every agent under `agents/base/global-scope/` is piped through the matching renderer (`agents/renderers/<cli>.sh`) to produce the CLI's native format, then written to that CLI's global directory (`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/`, `~/.codex/`, `~/.gemini/`). Claude additionally gets `skills/global-scope/*` under `~/.claude/skills/`. Codex additionally gets an `AGENTS.md` inventory. A single manifest at `~/.agent-skills/installer-manifest.json` tracks everything so subsequent runs are idempotent. Artifacts you authored by hand are never touched — only ones listed in the manifest.
+What happens: the installer fetches the repo tarball at `main` (or whatever `--ref` you pass). For each CLI in `--for`, every agent under `agents/base/global-scope/` is piped through the matching renderer (`agents/renderers/<cli>.sh`) to produce the CLI's native format, then written to that CLI's global directory (`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/`, `~/.codex/`, `~/.gemini/`, `~/.antigravity/`). Claude additionally gets `skills/global-scope/*` under `~/.claude/skills/`. Codex additionally gets an `AGENTS.md` inventory. A single manifest at `~/.agent-skills/installer-manifest.json` tracks everything so subsequent runs are idempotent. Artifacts you authored by hand are never touched — only ones listed in the manifest.
 
 **No `--for`?** If stdin is a TTY the installer will prompt multi-select. In a non-TTY pipe, `--for` is required (no silent default).
 
@@ -244,7 +245,7 @@ curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/in
 
 | Flag | Effect |
 |---|---|
-| `--for <list>` | Comma-separated CLIs: `claude`, `opencode`, `kilo`, `codex`, `gemini`. Multi-select TTY prompt if omitted; required in non-TTY mode. Also `AGENT_SKILLS_FOR`. |
+| `--for <list>` | Comma-separated CLIs: `claude`, `opencode`, `kilo`, `codex`, `gemini`, `agy`. Multi-select TTY prompt if omitted; required in non-TTY mode. Also `AGENT_SKILLS_FOR`. |
 | `--ref <branch\|tag\|sha>` | Pin to a specific revision. Default: `main`. Also `AGENT_SKILLS_REF`. |
 | `--repo <owner/name>` | Pull from a fork instead. Default: `AlastairThomson/AgentSkills`. Also `AGENT_SKILLS_REPO`. |
 | `--dest <dir>` | Override install root — each CLI installs under `<dir>/<cli>/`. Useful for sandboxed testing. Also `AGENT_SKILLS_DEST`. |
@@ -270,7 +271,7 @@ source:
   repo: AlastairThomson/AgentSkills   # or your fork
   ref: main                            # prefer a pinned tag in production
 target_clis: []                        # empty = inherit from ~/.agent-skills/installer-manifest.json
-                                       # else list: claude, opencode, kilo, codex, gemini
+                                       # else list: claude, opencode, kilo, codex, gemini, agy
 allowlist: []                          # empty = any skill in source is eligible
 deny: []
 auth:

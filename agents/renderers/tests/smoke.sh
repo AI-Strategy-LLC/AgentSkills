@@ -50,6 +50,20 @@ grep -q '^tools:$' <<<"$out" || fail "gemini: tools should be a block sequence (
 grep -q '^  - run_shell_command$' <<<"$out" || fail "gemini: expected 'Bash' mapped to 'run_shell_command'"
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "gemini: body missing"
 
+# Antigravity (`agy`) inherits Gemini's agent engine (shared core per the
+# official google-antigravity/antigravity-cli README), so the renderer reuses
+# tools_for_gemini + gemini_escape_placeholders verbatim. Output must be
+# byte-identical to gemini's so any regression there is caught here too.
+out=$("$renderers/agy.sh" "$base")
+grep -q '^name: branch-review$' <<<"$out" || fail "agy: missing name"
+! grep -q '^model:' <<<"$out" || fail "agy: must not emit model (Claude aliases are invalid in Antigravity)"
+grep -q '^tools:$' <<<"$out" || fail "agy: tools should be a block sequence (header on its own line)"
+! grep -q '^tools: \[' <<<"$out" || fail "agy: tools must be mapped names, not the canonical [Bash, ...] list"
+grep -q '^  - run_shell_command$' <<<"$out" || fail "agy: expected 'Bash' mapped to 'run_shell_command'"
+grep -q '^## Step 1 — Gather' <<<"$out" || fail "agy: body missing"
+diff <("$renderers/gemini.sh" "$base") <("$renderers/agy.sh" "$base") >/dev/null \
+    || fail "agy: output must be byte-identical to gemini's (shared core agent engine)"
+
 out=$("$renderers/codex.sh" "$base")
 grep -q '^name = "branch-review"$' <<<"$out" || fail "codex: missing name"
 # `model` is intentionally NOT emitted — Codex expects OpenAI model IDs, not
