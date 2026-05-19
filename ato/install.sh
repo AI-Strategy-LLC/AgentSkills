@@ -767,7 +767,11 @@ case "$ACTION" in
     install)
         CLIS=$(resolve_clis)
         echo "ATO Agent Collection installer"
-        echo "  source : $REPO @ $REF"
+        if [ -n "$FROM_LOCAL" ]; then
+            echo "  source : $FROM_LOCAL (local — --from)"
+        else
+            echo "  source : $REPO @ $REF"
+        fi
         echo "  CLIs   : $CLIS"
         if [ -n "$DEST" ]; then
             echo "  dest   : $DEST (override)"
@@ -815,7 +819,11 @@ case "$ACTION" in
         rm -f "$MPATH.old"
 
         echo
-        echo "✓ Installed ATO Agent Collection ($REPO@$REF) for: $CLIS"
+        if [ -n "$FROM_LOCAL" ]; then
+            echo "✓ Installed ATO Agent Collection from $FROM_LOCAL (local) for: $CLIS"
+        else
+            echo "✓ Installed ATO Agent Collection ($REPO@$REF) for: $CLIS"
+        fi
         echo "  Manifest: $MPATH"
         echo
         echo "Next steps:"
