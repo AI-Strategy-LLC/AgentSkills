@@ -64,6 +64,76 @@ grep -q '^## Step 1 — Gather' <<<"$out" || fail "agy: body missing"
 diff <("$renderers/gemini.sh" "$base") <("$renderers/agy.sh" "$base") >/dev/null \
     || fail "agy: output must be byte-identical to gemini's (shared core agent engine)"
 
+# Pi renders for the subagent extension (pi/install-subagent-extension.sh).
+# Its loader reads `tools` as a comma-separated STRING and splits on "," —
+# unlike every other CLI here, a YAML list would be silently mis-parsed.
+out=$("$renderers/pi.sh" "$base")
+grep -q '^name: branch-review$' <<<"$out" || fail "pi: missing name"
+grep -q '^description: "' <<<"$out" || fail "pi: missing description"
+# `model:` is intentionally NOT emitted — Pi passes it straight to
+# `pi --model`, which needs a concrete provider ID, not a Claude alias.
+! grep -q '^model:' <<<"$out" || fail "pi: must not emit model (Claude aliases are not resolvable Pi model IDs)"
+grep -q '^tools: bash, read, write, grep, find$' <<<"$out" \
+    || fail "pi: tools must be a comma-separated string of Pi tool names"
+! grep -q '^tools: \[' <<<"$out" || fail "pi: tools must NOT be a YAML list — Pi splits the raw string on commas"
+! grep -q '^tools:$' <<<"$out" || fail "pi: tools must be inline, not a block sequence"
+grep -q '^## Step 1 — Gather' <<<"$out" || fail "pi: body missing"
+
+# Tool-name mapping edge cases, checked on the two agents that exercise them:
+#   deep-review declares Agent  -> must become `subagent` (the tool the
+#     extension registers), otherwise its documented fan-out is silently dead.
+#   ato-artifact-collector declares Skill -> must be DROPPED, not passed
+#     through: Pi has no skill tool, and an unknown name in the allowlist
+#     makes the spawned subagent subprocess fail outright.
+out=$("$renderers/pi.sh" "$renderers/../base/global-scope/deep-review")
+grep -q '^tools: .*subagent' <<<"$out" || fail "pi: deep-review's Agent must map to 'subagent'"
+! grep -qi '^tools: .*glob' <<<"$out" || fail "pi: Glob must map to 'find', not pass through"
+# References must be inlined: Pi's loadAgentsFromDir() is a single
+# non-recursive readdirSync over *.md, so a references/ dir is never read.
+grep -q '^## Bundled references (inlined)$' <<<"$out" || fail "pi: deep-review references not inlined"
+
+ato_base="$renderers/../../../ato/agents/base/global-scope/ato-artifact-collector"
+if [ -d "$ato_base" ]; then
+    out=$("$renderers/pi.sh" "$ato_base" 2>/dev/null)
+    ! grep -qi '^tools: .*skill' <<<"$out" || fail "pi: Skill must be dropped (no Pi equivalent)"
+fi
+
+# Pi's loader has NO try/catch around parseFrontmatter, so a single agent with
+# invalid YAML throws and kills discovery for EVERY agent. Validate with Pi's
+# own parser when Pi is installed; skip cleanly when it isn't (CI, other devs).
+if command -v pi >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    pi_real=$(readlink -f "$(command -v pi)" 2>/dev/null \
+        || python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$(command -v pi)")
+    pi_fm="$(dirname "$(dirname "$pi_real")")/dist/utils/frontmatter.js"
+    if [ -f "$pi_fm" ]; then
+        pi_tmp=$(mktemp -d)
+        trap 'rm -rf "$pi_tmp"' EXIT
+        for d in "$renderers"/../base/global-scope/*/ "$renderers"/../../../ato/agents/base/global-scope/*/; do
+            [ -f "$d/metadata.yaml" ] || continue
+            n=$(basename "$d")
+            "$renderers/pi.sh" "$d" > "$pi_tmp/$n.md" 2>/dev/null || fail "pi: renderer failed on $n"
+        done
+        PI_FM="file://$pi_fm" PI_TMP="$pi_tmp" node --input-type=module -e '
+            const { parseFrontmatter } = await import(process.env.PI_FM);
+            const fs = await import("node:fs");
+            const dir = process.env.PI_TMP;
+            let bad = 0;
+            for (const f of fs.readdirSync(dir).filter(n => n.endsWith(".md"))) {
+                try {
+                    const { frontmatter } = parseFrontmatter(fs.readFileSync(`${dir}/${f}`, "utf-8"));
+                    if (!frontmatter.name || !frontmatter.description) {
+                        console.error(`  ${f}: loader would SKIP it (missing name/description)`); bad++;
+                    }
+                } catch (e) { console.error(`  ${f}: YAML throw — ${e.message}`); bad++; }
+            }
+            process.exit(bad ? 1 : 0);
+        ' || fail "pi: rendered agents are not loadable by Pi's own frontmatter parser (see above)"
+        rm -rf "$pi_tmp"
+        trap - EXIT
+        echo "  pi: validated rendered agents against Pi's own parser"
+    fi
+fi
+
 out=$("$renderers/codex.sh" "$base")
 grep -q '^name = "branch-review"$' <<<"$out" || fail "codex: missing name"
 # `model` is intentionally NOT emitted — Codex expects OpenAI model IDs, not

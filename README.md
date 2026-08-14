@@ -45,7 +45,7 @@ The ATO collection lives under its own `ato/` subtree and ships with its own ded
 | OpenAI Codex | `~/.codex/` | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` |
 | Gemini CLI | `~/.gemini/` | `<repo>/.gemini/` | `<name>.md` |
 | Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/` | `<repo>/.gemini/antigravity-cli/` *(extrapolated)* | `<name>.md` (shares Gemini's agent engine; literally nests under `~/.gemini/`) |
-| Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | _(skills only)_ |
+| Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | `<name>.md` — needs the subagent extension, see [`pi/README.md`](pi/README.md) |
 | Cursor | `~/.cursor/` | `<repo>/.cursor/` | `<name>.mdc` |
 
 **Native Windows support.** `install.ps1` and `ato/install.ps1` are the Windows entry points: they detect Git Bash, offer to install Git for Windows (via `winget` → Chocolatey → manual fallback) if missing, then forward to the bash installers. CLI directories follow the same convention with `~` resolving to `%USERPROFILE%`.

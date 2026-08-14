@@ -1,6 +1,6 @@
 ---
 name: skill-sync
-description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .gemini/antigravity-cli/, .pi/, .crush/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) and Crush (charmbracelet/crush) are skills-only — repo-scope skills install into <repo>/.agents/skills/ and <repo>/.crush/skills/ which the harness auto-discovers; agent rendering is skipped. Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
+description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .gemini/antigravity-cli/, .pi/, .crush/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) and Crush (charmbracelet/crush) take repo-scope skills only — they install into <repo>/.agents/skills/ and <repo>/.crush/skills/ which the harness auto-discovers; repo-scope agent rendering is skipped for both (Crush has no file-based subagents; Pi does not read project agents by default). Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
 ---
 
 # Skill Sync
@@ -60,7 +60,7 @@ In the target repo, installs go under a per-CLI directory. The installer manifes
 | Codex | `<repo>/.codex/` | `.toml` |
 | Gemini CLI | `<repo>/.gemini/` | `.md` |
 | Antigravity CLI (`agy`) | `<repo>/.gemini/antigravity-cli/` *(extrapolated; verify on a real per-repo install)* | `.md` |
-| Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (skills only — no agents) | — |
+| Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (repo-scope skills only — see note) | — |
 | Crush | `<repo>/.crush/skills/` and `<repo>/.agents/skills/` (skills only — agents live in crush.json) | — |
 
 For each selected CLI the install shape is:
@@ -192,13 +192,26 @@ case "$cli" in
     gemini)   root="<repo>/.gemini" ;;
     agy)      root="<repo>/.gemini/antigravity-cli" ;;   # Antigravity nests under .gemini/
     cursor)   root="<repo>/.cursor" ;;
-    pi)       root="<repo>/.pi"  ;;     # Pi has no subagents — skills only (handled below)
+    pi)       root="<repo>/.pi"  ;;     # repo-scope skills only (handled below) — see note
     crush)    root="<repo>/.crush" ;;   # Crush has no subagents — skills only (handled below)
 esac
 
-# Pi and Crush both have no subagents. Install repo-scope skills into a shared
-# per-repo location each harness auto-discovers, then continue to the next CLI
-# without rendering any agents.
+# Pi and Crush both skip repo-scope agent rendering, for different reasons.
+#
+# Crush genuinely has no file-based subagents (its agents are JSON in
+# crush.json).
+#
+# Pi DOES have subagents via the bundled subagent extension, and global-scope
+# agents install normally into ~/.pi/agent/agents/. But its project-agent
+# directory (<repo>/.pi/agents/) is not read unless the caller passes
+# agentScope: "both" — the extension defaults to "user", and its confirmation
+# prompt is skipped in headless mode, so we do not flip that default. Rendering
+# repo-scope agents there would produce files Pi ignores. This is moot today:
+# agents/base/repo-scope/ is empty. Revisit if a repo-scoped agent is ever
+# added — see pi/README.md.
+#
+# Both install repo-scope skills into a shared per-repo location the harness
+# auto-discovers, then continue to the next CLI without rendering agents.
 if [ "$cli" = "pi" ]; then
     pi_skills_dir="<repo>/.agents/skills"
     mkdir -p "$pi_skills_dir"

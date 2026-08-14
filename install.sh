@@ -101,7 +101,7 @@ Required:
                         codex      → ~/.codex/
                         gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
                         agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — replaces Gemini CLI; shares the ~/.gemini/ root)
-                        pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
+                        pi         → ~/.pi/agent/   (agents need the subagent extension — see pi/README.md)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
                         crush      → ~/.config/crush/ (skills only — Crush agents live in crush.json)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
@@ -227,15 +227,21 @@ cli_root() {
 }
 
 # Some CLIs only consume skills — they have no subagent concept and so the
-# installer should skip the agent rendering loop for them entirely. Pi
-# (pi.dev) is the first such CLI: it's a "minimal terminal coding harness"
-# whose only customization mechanism is skills (loaded from ~/.pi/agent/skills/
-# and ~/.agents/skills/). It has no Agent tool, no subagent_type, no equivalent
-# to ~/.claude/agents/.
+# installer should skip the agent rendering loop for them entirely. Crush
+# (charmbracelet/crush) is the only one left: its `Agent` type is a JSON
+# struct declared inline in crush.json, with no file-based subagent directory
+# and no extension API to add one.
+#
+# Pi used to be in this list. It no longer is. Pi core ships no subagent
+# concept, but it has a first-class extension API and bundles a complete
+# subagent implementation as an example, which pi/install-subagent-extension.sh
+# installs. With that extension loaded, Pi reads agents from
+# ~/.pi/agent/agents/*.md and exposes a `subagent` tool — so rendering agents
+# for Pi is worth doing. Without it the rendered agents are inert but harmless.
 cli_has_agents() {
     case "$1" in
-        pi|crush) return 1 ;;
-        *)        return 0 ;;
+        crush) return 1 ;;
+        *)     return 0 ;;
     esac
 }
 
@@ -332,7 +338,7 @@ prompt_for_clis() {
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/                  (deprecated for consumers after 2026-06-18)"
         echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — replaces Gemini CLI; nests under ~/.gemini/)"
-        echo "  7) pi        → ~/.pi/agent/                 (skills only)"
+        echo "  7) pi        → ~/.pi/agent/                 (agents need the subagent extension)"
         echo "  8) cursor    → ~/.cursor/                   (rules-as-MDC)"
         echo "  9) crush     → ~/.config/crush/             (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
@@ -496,9 +502,13 @@ agent_is_dir_form() {
 # whether the base bundles references — the renderer inlines the references
 # into the agent body instead. Codex (.toml) and Claude don't have this
 # problem.
+# Pi is flat-only for the mirror-image reason: its subagent loader does a
+# single non-recursive readdirSync() over agents/*.md, so a bundled
+# references/ subdirectory would never be read at all and the agent would
+# cite files that, from its point of view, do not exist.
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|agy|cursor) return 0 ;;
+        opencode|kilo|gemini|agy|cursor|pi) return 0 ;;
         *) return 1 ;;
     esac
 }

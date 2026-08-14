@@ -287,6 +287,6 @@ Use these as defaults unless the user has specified different targets.
 
 When the user asks "why is this file at N% coverage?" or "what would it take to reach target for X?", delegate to the `coverage-investigator` agent. Its job is to read the target file(s), find existing tests, classify each uncovered entry point (pure / injectable / hard-wired / unreachable / integration-only), and return an effort estimate.
 
-Invoke the `Agent` tool with `subagent_type: "coverage-investigator"`. Pass the target file path(s), the current coverage number, and the project's coverage target as the prompt.
+Delegate to the **`coverage-investigator`** agent using this harness's subagent mechanism — Claude Code: the `Agent` tool with `subagent_type: "coverage-investigator"`; Pi: the `subagent` tool with `{ agent: "coverage-investigator" }`; otherwise the harness equivalent. If the harness has no subagent mechanism at all, follow the agent's own instructions inline instead of erroring. Pass the target file path(s), the current coverage number, and the project's coverage target as the prompt.
 
 Relay the agent's classification table and recommendation to the user. Do not start writing tests until the user confirms which gaps to tackle.
