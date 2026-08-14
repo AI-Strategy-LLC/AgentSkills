@@ -70,6 +70,7 @@ PAIRS=(
     "agents/renderers/agy.sh:ato/agents/renderers/agy.sh"
     "agents/renderers/kilo.sh:ato/agents/renderers/kilo.sh"
     "agents/renderers/opencode.sh:ato/agents/renderers/opencode.sh"
+    "agents/renderers/pi.sh:ato/agents/renderers/pi.sh"
 )
 
 # ---- helpers --------------------------------------------------------------

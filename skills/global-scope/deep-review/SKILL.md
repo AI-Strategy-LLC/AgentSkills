@@ -9,7 +9,7 @@ This skill is a thin stub that triggers on "deep review" / "full audit" / "threa
 
 ## What to do
 
-1. Invoke the `Agent` tool with `subagent_type: "deep-review"`. Pass through any scoping the user provided (specific commit SHA, specific axis emphasis, adversarial-review framing). No other prompt is required — the agent's system prompt has the full 8-axis workflow, the submission gate, and the report template.
+1. Delegate to the **`deep-review`** agent using this harness's subagent mechanism — Claude Code: the `Agent` tool with `subagent_type: "deep-review"`; Pi: the `subagent` tool with `{ agent: "deep-review" }`; otherwise the harness equivalent. If the harness has no subagent mechanism at all, follow the agent's own instructions inline instead of erroring. Pass through any scoping the user provided (specific commit SHA, specific axis emphasis, adversarial-review framing). No other prompt is required — the agent's system prompt has the full 8-axis workflow, the submission gate, and the report template.
 2. When the agent returns, relay its four-item output to the user verbatim:
    - Shippable? (yes / no / conditional)
    - Top 3–5 findings with severity tier and axis tag

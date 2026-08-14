@@ -33,7 +33,7 @@ Default (no flags): run all three phases. At least one phase must remain enabled
 ## What to do
 
 1. **Parse flags** from the user's invocation. Build the enabled-phase list.
-2. **Invoke the agent** via the `Agent` tool with `subagent_type: "bdd-audit"`. In the prompt, state:
+2. **Delegate to the `bdd-audit` agent** using this harness's subagent mechanism — Claude Code: the `Agent` tool with `subagent_type: "bdd-audit"`; Pi: the `subagent` tool with `{ agent: "bdd-audit" }`; otherwise the harness equivalent. If the harness has no subagent mechanism at all, follow the agent's own instructions inline instead of erroring. In the prompt, state:
    - The working directory.
    - The enabled phases (named explicitly, e.g. "Run phases: spec-to-code, code-to-spec" — omit the skipped ones).
 3. The agent will write `docs/bdd-audit/REPORT.md` and return a compact structured summary plus the prioritised action list.

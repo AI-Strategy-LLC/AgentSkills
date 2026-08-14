@@ -258,3 +258,83 @@ tools_for_gemini() {
         printf '%s- %s\n' "$indent" "$mapped"
     done
 }
+
+# tools_for_pi <tools-array-string>
+# Converts a YAML inline list like `[Bash, Read, Write]` into the single
+# comma-separated string Pi's subagent loader expects. Unlike every other
+# CLI we render for, Pi's `tools:` frontmatter value is a *string*, split on
+# commas by the loader:
+#
+#     tools: bash, read, write, grep, find
+#
+# Source: the bundled subagent extension's agents.ts —
+#   frontmatter.tools?.split(",").map(t => t.trim()).filter(Boolean)
+# The resulting array is passed straight through to `pi --tools <list>` when
+# the subagent subprocess is spawned, so every emitted name must be a real
+# Pi tool name or the child process rejects the flag.
+#
+# Pi's built-in tool set is: read, bash, edit, write, grep, find, ls.
+# (read/bash/edit/write are on by default; grep/find/ls are opt-in — which is
+# exactly what an explicit --tools allowlist does.)
+#
+# Mapping (canonical Claude alias -> Pi tool name):
+#   Bash -> bash    Read -> read    Write -> write   Edit -> edit
+#   Grep -> grep    Glob -> find    Agent -> subagent
+#
+# `Glob` maps to `find` as the nearest equivalent. Note there is no `ls` in
+# the output for any of our agents — every one of them also carries Bash, so
+# directory listing remains reachable.
+#
+# `Agent` maps to `subagent`, the tool name registered by the vendored
+# subagent extension (see pi/extension/). This is deliberate: `deep-review`
+# declares Agent and its body fans out to child agents, so dropping the tool
+# would leave a documented capability silently unwired in Pi. Nesting works
+# because the extension spawns children *without* `--no-extensions`, so the
+# child re-discovers the extension, and `pi --tools` applies to extension
+# tools as well as built-ins. Runaway recursion is bounded by the extension's
+# own MAX_PARALLEL_TASKS (8) and MAX_CONCURRENCY (4) caps.
+#
+# Skill, WebFetch and WebSearch are dropped: Pi surfaces skills natively (there
+# is no tool to grant), and web access requires a third-party package we do
+# not bundle. Dropping is correct rather than passing them through, because an
+# unrecognized name in `--tools` makes the child process fail outright.
+tools_for_pi() {
+    local raw="$1"
+
+    # Strip brackets and split on commas.
+    raw="${raw#\[}"
+    raw="${raw%\]}"
+
+    local out=""
+    local IFS=,
+    for t in $raw; do
+        # trim whitespace
+        t=$(printf '%s' "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$t" ] && continue
+        local lower mapped
+        lower=$(printf '%s' "$t" | tr '[:upper:]' '[:lower:]')
+        case "$lower" in
+            bash)  mapped=bash ;;
+            read)  mapped=read ;;
+            write) mapped=write ;;
+            edit)  mapped=edit ;;
+            grep)  mapped=grep ;;
+            glob)  mapped=find ;;
+            ls)    mapped=ls ;;
+            agent) mapped=subagent ;;
+            skill|webfetch|websearch)
+                # No Pi equivalent. Must be dropped, not passed through — an
+                # unknown name in `--tools` breaks the subagent subprocess.
+                continue
+                ;;
+            *)
+                # Unknown tool: drop it, for the same reason. Warn so a new
+                # tool name in metadata.yaml doesn't vanish unnoticed.
+                echo "tools_for_pi: dropping tool '$t' — no Pi equivalent" >&2
+                continue
+                ;;
+        esac
+        out="${out:+$out, }$mapped"
+    done
+    printf '%s' "$out"
+}

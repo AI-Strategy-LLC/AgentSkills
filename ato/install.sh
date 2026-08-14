@@ -90,7 +90,7 @@ Required:
                         codex      → ~/.codex/
                         gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
                         agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — nests under ~/.gemini/)
-                        pi         → ~/.pi/agent/   (skills only — Pi has no subagents)
+                        pi         → ~/.pi/agent/   (agents need the subagent extension — see pi/README.md)
                         cursor     → ~/.cursor/     (rules-as-MDC)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
                       mode (e.g. pipe into sh -c) --for is required.
@@ -179,11 +179,15 @@ cli_root() {
     esac
 }
 
-# Pi has no subagents — only consumes skills.
+# Every CLI this installer supports can consume agents. Pi core ships no
+# subagent concept, but it has an extension API and bundles a complete
+# subagent implementation as an example — installed by
+# pi/install-subagent-extension.sh in the parent AgentSkills repo. With that
+# extension loaded, Pi reads agents from ~/.pi/agent/agents/*.md and exposes
+# a `subagent` tool. Without it the rendered agents are inert but harmless.
 cli_has_agents() {
     case "$1" in
-        pi) return 1 ;;
-        *)  return 0 ;;
+        *) return 0 ;;
     esac
 }
 
@@ -254,7 +258,7 @@ prompt_for_clis() {
         echo "  4) codex     → ~/.codex/"
         echo "  5) gemini    → ~/.gemini/         (deprecated for consumers after 2026-06-18)"
         echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — nests under ~/.gemini/)"
-        echo "  7) pi        → ~/.pi/agent/       (skills only)"
+        echo "  7) pi        → ~/.pi/agent/       (agents need the subagent extension)"
         echo "  8) cursor    → ~/.cursor/         (rules-as-MDC)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
@@ -412,9 +416,12 @@ agent_is_dir_form() {
     [ -d "$d/references" ] || [ -d "$d/evals" ] || [ -f "$d/config.yaml" ]
 }
 
+# Pi joins this list for the mirror-image reason: its subagent loader does a
+# single non-recursive readdirSync() over agents/*.md, so a bundled
+# references/ subdirectory would never be read at all.
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|agy|cursor) return 0 ;;
+        opencode|kilo|gemini|agy|cursor|pi) return 0 ;;
         *) return 1 ;;
     esac
 }

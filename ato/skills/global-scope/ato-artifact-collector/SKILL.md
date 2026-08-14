@@ -105,7 +105,7 @@ When SharePoint (or any other external source) is configured, **never** decide w
 
 ## Step 2 — Launch the agent
 
-Invoke the `Agent` tool with `subagent_type: "ato-artifact-collector"`. Pass:
+Delegate to the **`ato-artifact-collector`** agent using this harness's subagent mechanism — Claude Code: the `Agent` tool with `subagent_type: "ato-artifact-collector"`; Pi: the `subagent` tool with `{ agent: "ato-artifact-collector" }`; otherwise the harness equivalent. If the harness has no subagent mechanism at all, follow the agent's own instructions inline instead of erroring. Pass:
 
 - The confirmed scope (from Step 0 flags or Step 1 interview).
 - The repo's working directory.

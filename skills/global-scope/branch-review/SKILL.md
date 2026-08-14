@@ -9,7 +9,7 @@ This skill is a thin stub that triggers on "review branches" / "produce CHANGES.
 
 ## What to do
 
-1. Invoke the `Agent` tool with `subagent_type: "branch-review"`. No prompt required beyond stating the working directory context — the agent's system prompt has the full workflow.
+1. Delegate to the **`branch-review`** agent using this harness's subagent mechanism — Claude Code: the `Agent` tool with `subagent_type: "branch-review"`; Pi: the `subagent` tool with `{ agent: "branch-review" }`; otherwise the harness equivalent. If the harness has no subagent mechanism at all, follow the agent's own instructions inline instead of erroring. No prompt required beyond stating the working directory context — the agent's system prompt has the full workflow.
 2. When the agent returns, relay its recommendation table to the user. The full per-branch detail lives in `CHANGES.md` on disk.
 3. Wait for explicit instruction before merging, pruning, or creating PRs. If the user wants to act on multiple PRs at once, hand off to `merge-sprint`.
 
