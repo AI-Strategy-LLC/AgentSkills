@@ -123,4 +123,7 @@ This is a meta-rule. Don't treat any of the rules above as self-enforcing. The r
 
 **How to apply:** When you notice you've drifted from a rule above, surface it explicitly: "I drifted from rule X; here's the catch and the recovery." Don't quietly self-correct without flagging — the drift event is itself evidence the text-only reminder isn't enough and warrants a mechanical guard.
 
+### Proof, not assumption
+In everything you do, verify, do not assume. If you find yourself thinking "I understand that..." or "I am assuming..." or "I think that...", stop and review the actual code and documents to verify it.  While the understanding may be in your context, it may have been diffused over time, so verify.
+
 <!-- END counter-patterns block -->
