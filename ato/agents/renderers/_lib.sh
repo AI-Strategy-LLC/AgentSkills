@@ -73,7 +73,7 @@ toml_guard_body() {
 
 # inline_references <base-dir>
 # Emit each .md file from <base-dir>/references/ as a markdown section,
-# concatenated to stdout. Used by opencode/kilo/gemini renderers to keep
+# concatenated to stdout. Used by opencode/kilo renderers to keep
 # rendered agents flat (agents/<name>.md) — those CLIs recursively scan
 # agents/<name>/references/*.md and register every reference doc as a
 # (broken, frontmatter-less) namespaced agent. Inlining the references
@@ -145,11 +145,11 @@ tools_as_record() {
     done
 }
 
-# gemini_escape_placeholders
-# Filter stdin -> stdout, defusing `${WORD}` patterns so Gemini's agent loader
+# agy_escape_placeholders
+# Filter stdin -> stdout, defusing `${WORD}` patterns so Antigravity's agent loader
 # does not treat them as required template inputs.
 #
-# Gemini's templateString() (packages/core/src/agents/utils.ts) applies the
+# Antigravity's (ex-Gemini) templateString() (packages/core/src/agents/utils.ts) applies the
 # regex /\$\{(\w+)\}/g to the entire agent body and refuses to load the agent
 # if any matched WORD isn't in the inputs map (query, cliVersion, activeModel,
 # today). There is no escape syntax — the regex match is unconditional.
@@ -167,10 +167,10 @@ tools_as_record() {
 # agent in this repo), this transformation will smuggle a ZWSP into the
 # shell command and break it. If that ever becomes a need, replace this
 # blanket transform with a marker-aware version.
-gemini_escape_placeholders() {
+agy_escape_placeholders() {
     # POSIX awk: insert ZWSP (UTF-8 bytes E2 80 8B) between `$` and `{` for
     # any `${WORD}` run where WORD is one or more `[A-Za-z0-9_]`. Anything
-    # else (e.g. `${X-default}`, `${ VAR }`) is left alone — Gemini's regex
+    # else (e.g. `${X-default}`, `${ VAR }`) is left alone — the loader's regex
     # wouldn't match it anyway. The pattern is a literal-text walk rather
     # than a regex replace so we avoid GNU-only `gensub` and don't depend
     # on perl/python being installed.
@@ -206,9 +206,9 @@ gemini_escape_placeholders() {
     '
 }
 
-# tools_for_gemini <tools-array-string> [indent]
+# tools_for_agy <tools-array-string> [indent]
 # Converts a YAML inline list like `[Bash, Read, Write]` into a YAML block
-# sequence using Gemini CLI's built-in tool names. Gemini's agent loader
+# sequence using Antigravity's built-in tool names. Antigravity's agent loader
 # (packages/core/src/agents/agentLoader.ts) validates every `tools:` entry
 # against ALL_BUILTIN_TOOL_NAMES via isValidToolName() and rejects the
 # canonical Claude names (Bash, Read, Write, ...) with "Invalid tool name".
@@ -217,12 +217,12 @@ gemini_escape_placeholders() {
 #       - run_shell_command
 #       - read_file
 #
-# Mapping (canonical Claude alias -> Gemini built-in tool name):
+# Mapping (canonical Claude alias -> Antigravity built-in tool name):
 #   Bash -> run_shell_command   Read -> read_file       Write -> write_file
 #   Edit -> replace             Grep -> grep_search     Glob -> glob
 #   Skill -> activate_skill     Agent -> invoke_agent
 #   WebFetch -> web_fetch       WebSearch -> google_web_search
-tools_for_gemini() {
+tools_for_agy() {
     local raw="$1"
     local indent="${2:-  }"
 
@@ -249,7 +249,7 @@ tools_for_gemini() {
             webfetch)  mapped=web_fetch ;;
             websearch) mapped=google_web_search ;;
             *)
-                # Unknown tool: emit lowercased and let Gemini's loader
+                # Unknown tool: emit lowercased and let the loader
                 # complain if it doesn't recognize it. Better than silently
                 # dropping a capability the agent body relies on.
                 mapped="$lower"

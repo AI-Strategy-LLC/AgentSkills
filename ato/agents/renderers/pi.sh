@@ -32,7 +32,7 @@ tools=$(meta_top "$meta" tools)
 [ -n "$name" ] || { echo "pi.sh: metadata.yaml in $base has no name" >&2; exit 1; }
 [ -n "$description" ] || { echo "pi.sh: metadata.yaml in $base has no description" >&2; exit 1; }
 
-# Note: `model` is intentionally not emitted, for the same reason as gemini.sh.
+# Note: `model` is intentionally not emitted, for the same reason as agy.sh.
 # Pi passes the frontmatter value straight to `pi --model <value>`, which wants
 # a concrete provider model ID (e.g. `claude-haiku-4-5`), not the Claude-family
 # aliases (opus/sonnet/haiku) our canonical metadata uses. Pi's default provider
@@ -52,7 +52,7 @@ tools=$(meta_top "$meta" tools)
     printf -- '---\n\n'
 }
 
-# Flat form + inlined references, same as opencode/kilo/gemini — but for a
+# Flat form + inlined references, same as opencode/kilo/agy — but for a
 # different underlying reason. Those CLIs recursively scan agents/ and would
 # register each reference .md as a broken agent. Pi's discovery is the mirror
 # image: loadAgentsFromDir() does a single non-recursive readdirSync() over

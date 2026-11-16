@@ -17,7 +17,7 @@
 #   --snippet-only   Skip copy/chmod; just print the resolved snippet.
 #
 # Note: the hook system targeted here is Claude Code's. Other CLIs (OpenCode,
-# Kilo, Codex, Gemini, Pi) have different (or no) hook surfaces and these
+# Kilo, Codex, Antigravity, Pi, Hermes) have different (or no) hook surfaces and these
 # scripts will not run there.
 
 set -euo pipefail

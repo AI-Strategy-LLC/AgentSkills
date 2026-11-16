@@ -1,6 +1,6 @@
 ---
 name: skill-sync
-description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/, .gemini/antigravity-cli/, .pi/, .crush/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Pi (pi.dev) and Crush (charmbracelet/crush) take repo-scope skills only — they install into <repo>/.agents/skills/ and <repo>/.crush/skills/ which the harness auto-discovers; repo-scope agent rendering is skipped for both (Crush has no file-based subagents; Pi does not read project agents by default). Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
+description: "Provision a repo's per-CLI agent and skill directories (.claude/, .opencode/, .kilo/, .codex/, .gemini/antigravity-cli/, .pi/, .crush/) with only the artifacts relevant to its languages and workflow. Detects toolchains (Cargo.toml, package.json, pyproject.toml, Package.swift, *.csproj, go.mod, Gemfile, CMakeLists.txt, composer.json, DESCRIPTION, *.sas, Makefile.PL, .sql), fetches the matching subset from an org-configured GitHub source repo, renders every agent through the per-CLI renderer for every CLI the user installed for, and writes a .sync-manifest.json for idempotent re-runs. Hermes Agent has no per-repo skills directory and is skipped. Pi (pi.dev) and Crush (charmbracelet/crush) take repo-scope skills only — they install into <repo>/.agents/skills/ and <repo>/.crush/skills/ which the harness auto-discovers; repo-scope agent rendering is skipped for both (Crush has no file-based subagents; Pi does not read project agents by default). Modes: apply, --dry-run, --status, --prune. Accepts --for <cli>[,<cli>...] to override the CLI set. Ambient gh auth. Use when setting up a new repo, after adding/removing a language, or after adding a new CLI to your global install."
 ---
 
 # Skill Sync
@@ -38,7 +38,7 @@ agents/
       coverage-investigator/{agent.md, metadata.yaml}
       ato-artifact-collector/{agent.md, metadata.yaml, references/, evals/, config.yaml}
     repo-scope/      # empty today; reserved for future repo-scoped agents
-  renderers/         # one script per CLI (claude.sh, opencode.sh, kilo.sh, gemini.sh, agy.sh, codex.sh)
+  renderers/         # one script per CLI (claude.sh, opencode.sh, kilo.sh, agy.sh, codex.sh)
     + codex-agents-md.sh for the Codex AGENTS.md inventory
 ```
 
@@ -58,9 +58,9 @@ In the target repo, installs go under a per-CLI directory. The installer manifes
 | OpenCode | `<repo>/.opencode/` | `.md` |
 | Kilo Code | `<repo>/.kilo/` | `.md` |
 | Codex | `<repo>/.codex/` | `.toml` |
-| Gemini CLI | `<repo>/.gemini/` | `.md` |
 | Antigravity CLI (`agy`) | `<repo>/.gemini/antigravity-cli/` *(extrapolated; verify on a real per-repo install)* | `.md` |
 | Pi (pi.dev) | `<repo>/.pi/` and `<repo>/.agents/skills/` (repo-scope skills only — see note) | — |
+| Hermes Agent | *(none — Hermes has no per-repo skills dir; skipped)* | — |
 | Crush | `<repo>/.crush/skills/` and `<repo>/.agents/skills/` (skills only — agents live in crush.json) | — |
 
 For each selected CLI the install shape is:
@@ -75,7 +75,7 @@ For each selected CLI the install shape is:
 
 Codex additionally gets `<repo>/.codex/AGENTS.md` — an inventory of installed agents rendered via `agents/renderers/codex-agents-md.sh`.
 
-**Why skills are Claude-only per-repo for now.** Per-repo skill placement is still Claude-only here even though OpenCode, Kilo, Gemini, Antigravity, and Codex all support `SKILL.md` natively at the global tier — `install.sh` (global) handles them via the cross-scan compatibility paths (`~/.agents/skills/` for OpenCode/Kilo/Gemini/Antigravity, dedicated dirs for Claude/Codex). Per-repo skill scanning paths differ by CLI (e.g., `<repo>/.opencode/skills/` vs `<repo>/.kilo/skills/` vs `<repo>/.gemini/skills/` vs `<repo>/.antigravity/skills/`) and there is no equivalent shared `.agents/skills/` convention at the per-repo tier in every CLI. Until that lands consistently, repo-scope skills go to `.claude/skills/` only and other CLIs read repo-scope content via Claude's directory if they cross-scan it; otherwise per-CLI repo-scope skill placement should be added when there is a real need.
+**Why skills are Claude-only per-repo for now.** Per-repo skill placement is still Claude-only here even though OpenCode, Kilo, Antigravity, and Codex all support `SKILL.md` natively at the global tier — `install.sh` (global) handles them via the cross-scan compatibility paths (`~/.agents/skills/` for OpenCode/Kilo/Antigravity, dedicated dirs for Claude/Codex). Per-repo skill scanning paths differ by CLI (e.g., `<repo>/.opencode/skills/` vs `<repo>/.kilo/skills/` vs `<repo>/.antigravity/skills/`) and there is no equivalent shared `.agents/skills/` convention at the per-repo tier in every CLI. Until that lands consistently, repo-scope skills go to `.claude/skills/` only and other CLIs read repo-scope content via Claude's directory if they cross-scan it; otherwise per-CLI repo-scope skill placement should be added when there is a real need.
 
 ## When to run
 
@@ -97,7 +97,7 @@ source:
   repo: your-org/ClaudeSkills           # GitHub owner/repo
   ref: main                             # branch, tag, or commit SHA (prefer a pinned tag)
 target_clis: []                         # optional. Empty = read from ~/.agent-skills/installer-manifest.json
-                                        # else comma-list of: claude, opencode, kilo, codex, gemini, agy, pi, cursor, crush
+                                        # else comma-list of: claude, opencode, kilo, codex, agy, pi, cursor, crush, hermes
 allowlist: []                           # empty = every skill/agent in source is available
                                         # non-empty = only these directory names may be installed
 deny: []                                # always exclude these (takes precedence over allowlist)
@@ -116,7 +116,7 @@ auth:
    - If the user passed `--for <list>` on invocation, use that.
    - Else if config has `target_clis:` non-empty, use that.
    - Else read `~/.agent-skills/installer-manifest.json` and use the `clis` array from the most recent `install.sh` run.
-   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / gemini / agy / pi / cursor / crush".
+   - Else ask the user via `AskUserQuestion` (multi-select): "Which CLIs should I configure this repo for? claude / opencode / kilo / codex / agy / pi / cursor / crush".
 3. If `auth.method: gh`, check `gh auth status` succeeds; if `ssh`, check `ssh -T git@github.com 2>&1 | grep -q 'successfully authenticated'`. If auth is missing, **stop** with an actionable message — do not prompt to store tokens.
 
 ### Step 2 — Detect the repo's toolchains and workflow signals
@@ -189,11 +189,11 @@ case "$cli" in
     opencode) root="<repo>/.opencode" ;;
     kilo)     root="<repo>/.kilo" ;;
     codex)    root="<repo>/.codex" ;;
-    gemini)   root="<repo>/.gemini" ;;
-    agy)      root="<repo>/.gemini/antigravity-cli" ;;   # Antigravity nests under .gemini/
+    agy)      root="<repo>/.gemini/antigravity-cli" ;;   # Antigravity nests under the legacy .gemini/
     cursor)   root="<repo>/.cursor" ;;
     pi)       root="<repo>/.pi"  ;;     # repo-scope skills only (handled below) — see note
     crush)    root="<repo>/.crush" ;;   # Crush has no subagents — skills only (handled below)
+    hermes)   continue ;;               # Hermes has no per-repo skills dir and no file agents — nothing to install
 esac
 
 # Pi and Crush both skip repo-scope agent rendering, for different reasons.
@@ -316,7 +316,7 @@ Teams split on whether synced skills/agents should be committed (a team lead run
 
 Otherwise, ask via `AskUserQuestion` with two options:
 
-- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/` (which also covers `.gemini/antigravity-cli/` for agy) (as applicable) + manifest.
+- **Committed** — Team lead runs `skill-sync` once, commits `.claude/`, `.opencode/`, `.kilo/`, `.codex/`, `.gemini/antigravity-cli/` (agy) (as applicable) + manifest.
 - **Ignored** — Each developer runs `skill-sync` themselves; those directories + the manifest stay gitignored.
 
 **Apply `committed`:**
@@ -337,7 +337,7 @@ Otherwise, ask via `AskUserQuestion` with two options:
   .opencode/
   .kilo/
   .codex/
-  .gemini/                  # also covers .gemini/antigravity-cli/ for agy
+  .gemini/antigravity-cli/  # agy
   ```
 
 - Record `commit_policy: "ignored"` in the manifest.

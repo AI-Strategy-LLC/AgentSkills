@@ -1,6 +1,6 @@
 # AgentSkills
 
-A curated collection of **multi-CLI AI skills and agents** — drop-in capabilities for [Claude Code](https://docs.claude.com/claude-code), [OpenCode](https://opencode.ai), [Kilo Code](https://kilo.ai), [OpenAI Codex CLI](https://developers.openai.com/codex), [Gemini CLI](https://geminicli.com), and [Antigravity CLI](https://antigravity.google/) (`agy`). Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time; you pick which CLI(s) to install for.
+A curated collection of **multi-CLI AI skills and agents** — drop-in capabilities for [Claude Code](https://docs.claude.com/claude-code), [OpenCode](https://opencode.ai), [Kilo Code](https://kilo.ai), [OpenAI Codex CLI](https://developers.openai.com/codex), [Antigravity CLI](https://antigravity.google/) (`agy`), and [Hermes Agent](https://github.com/NousResearch/hermes-agent) (skills only). Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time; you pick which CLI(s) to install for.
 
 The tree is split into **global-scope** (user-level, installed once per CLI into each CLI's global directory — available in every repo) and **repo-scope** (per-repo, installed by [`skill-sync`](skills/global-scope/skill-sync/SKILL.md) into each CLI's per-repo directory only when the toolchain matches). Instead of installing everything globally and hoping the harness picks the right one, repo-scope artifacts land only in the repos that actually need them.
 
@@ -14,7 +14,7 @@ agents/
   base/              # canonical agent source (CLI-agnostic: agent.md + metadata.yaml)
     global-scope/    # general-purpose agents
     repo-scope/      # 0 agents today; reserved
-  renderers/         # canonical per-CLI renderers: claude.sh, opencode.sh, kilo.sh, gemini.sh, agy.sh, codex.sh
+  renderers/         # canonical per-CLI renderers: claude.sh, opencode.sh, kilo.sh, agy.sh, codex.sh
 install.sh           # all-in-one installer: --for <cli>[,<cli>...]
 ato/                 # ATO (NIST 800-53) collection — independently shareable subset
   skills/            # ATO skills (canonical) + auth-* mirrors (kept in sync)
@@ -43,10 +43,10 @@ The ATO collection lives under its own `ato/` subtree and ships with its own ded
 | OpenCode | `~/.config/opencode/` | `<repo>/.opencode/` | `<name>.md` |
 | Kilo Code | `~/.config/kilo/` | `<repo>/.kilo/` | `<name>.md` |
 | OpenAI Codex | `~/.codex/` | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` |
-| Gemini CLI | `~/.gemini/` | `<repo>/.gemini/` | `<name>.md` |
-| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/` | `<repo>/.gemini/antigravity-cli/` *(extrapolated)* | `<name>.md` (shares Gemini's agent engine; literally nests under `~/.gemini/`) |
+| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/` | `<repo>/.gemini/antigravity-cli/` *(extrapolated)* | `<name>.md` (literally nests under the legacy `~/.gemini/`) |
 | Pi (pi.dev) | `~/.pi/agent/` | `<repo>/.pi/` | `<name>.md` — needs the subagent extension, see [`pi/README.md`](pi/README.md) |
 | Cursor | `~/.cursor/` | `<repo>/.cursor/` | `<name>.mdc` |
+| Hermes Agent | `~/.hermes/` (skills in `~/.hermes/skills/`) | — | skills only (no file-based agents) |
 
 **Native Windows support.** `install.ps1` and `ato/install.ps1` are the Windows entry points: they detect Git Bash, offer to install Git for Windows (via `winget` → Chocolatey → manual fallback) if missing, then forward to the bash installers. CLI directories follow the same convention with `~` resolving to `%USERPROFILE%`.
 
@@ -245,7 +245,7 @@ curl -fsSL https://raw.githubusercontent.com/AlastairThomson/AgentSkills/main/in
 
 | Flag | Effect |
 |---|---|
-| `--for <list>` | Comma-separated CLIs: `claude`, `opencode`, `kilo`, `codex`, `gemini`, `agy`. Multi-select TTY prompt if omitted; required in non-TTY mode. Also `AGENT_SKILLS_FOR`. |
+| `--for <list>` | Comma-separated CLIs: `claude`, `opencode`, `kilo`, `codex`, `agy`, `pi`, `cursor`, `crush`, `hermes`. Multi-select TTY prompt if omitted; required in non-TTY mode. Also `AGENT_SKILLS_FOR`. |
 | `--ref <branch\|tag\|sha>` | Pin to a specific revision. Default: `main`. Also `AGENT_SKILLS_REF`. |
 | `--repo <owner/name>` | Pull from a fork instead. Default: `AlastairThomson/AgentSkills`. Also `AGENT_SKILLS_REPO`. |
 | `--dest <dir>` | Override install root — each CLI installs under `<dir>/<cli>/`. Useful for sandboxed testing. Also `AGENT_SKILLS_DEST`. |
@@ -271,7 +271,7 @@ source:
   repo: AlastairThomson/AgentSkills   # or your fork
   ref: main                            # prefer a pinned tag in production
 target_clis: []                        # empty = inherit from ~/.agent-skills/installer-manifest.json
-                                       # else list: claude, opencode, kilo, codex, gemini, agy
+                                       # else list: claude, opencode, kilo, codex, agy, pi, cursor, crush, hermes
 allowlist: []                          # empty = any skill in source is eligible
 deny: []
 auth:

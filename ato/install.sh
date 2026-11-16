@@ -64,7 +64,7 @@ fi
 REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
 REF="${AGENT_SKILLS_REF:-main}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
-FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,agy,pi
+FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,agy,pi,cursor,hermes
 FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path containing ato/ (or being the ato/ folder)
 ACTION="install"
 ASSUME_YES=0
@@ -72,7 +72,7 @@ KEEP_CACHE=""
 
 MANIFEST_NAME="ato-installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini agy pi cursor"
+SUPPORTED_CLIS="claude opencode kilo codex agy pi cursor hermes"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -88,8 +88,8 @@ Required:
                         opencode   → ~/.config/opencode/
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
-                        gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
                         agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — nests under ~/.gemini/)
+                        hermes     → ~/.hermes/     (skills only)
                         pi         → ~/.pi/agent/   (agents need the subagent extension — see pi/README.md)
                         cursor     → ~/.cursor/     (rules-as-MDC)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
@@ -168,18 +168,20 @@ cli_root() {
         opencode) printf '%s/opencode' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
-        gemini)   printf '%s/.gemini' "$HOME" ;;
         # Antigravity CLI deliberately nests under ~/.gemini/ — see the main
         # installer comment. ~/.antigravity/ is the desktop app's directory,
         # NOT where the CLI reads from.
         agy)      printf '%s/.gemini/antigravity-cli' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
+        hermes)   printf '%s/.hermes' "$HOME" ;;
         *) die "unknown CLI: $cli" ;;
     esac
 }
 
-# Every CLI this installer supports can consume agents. Pi core ships no
+# Hermes Agent is skills-only: it spawns subagents at runtime via its
+# built-in `delegate_task` tool and has no on-disk agent definitions. Every
+# other CLI here can consume agents. Pi core ships no
 # subagent concept, but it has an extension API and bundles a complete
 # subagent implementation as an example — installed by
 # pi/install-subagent-extension.sh in the parent AgentSkills repo. With that
@@ -187,7 +189,8 @@ cli_root() {
 # a `subagent` tool. Without it the rendered agents are inert but harmless.
 cli_has_agents() {
     case "$1" in
-        *) return 0 ;;
+        hermes) return 1 ;;
+        *)      return 0 ;;
     esac
 }
 
@@ -210,7 +213,7 @@ cli_agents_subdir() {
     esac
 }
 
-# Same dedup rule as the main installer: opencode/kilo/gemini/agy/codex/pi all
+# Same dedup rule as the main installer: opencode/kilo/agy/codex/pi all
 # auto-discover ~/.agents/skills/, so we install once into that shared
 # location. Claude is the only CLI that doesn't scan ~/.agents/, so it gets
 # its own ~/.claude/skills/.
@@ -218,11 +221,14 @@ cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
         claude)                                bucket=".claude/skills" ;;
-        opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        opencode|kilo|codex|pi|cursor)          bucket=".agents/skills" ;;
         # Antigravity reads ~/.gemini/antigravity-cli/skills/ reliably today;
         # ~/.agents/skills/ is documented but currently doesn't surface in
         # the CLI. Pin to the agy-specific path until that bug is fixed.
         agy)                                    bucket=".gemini/antigravity-cli/skills" ;;
+        # Hermes scans ~/.hermes/skills/ recursively and ignores
+        # ~/.agents/skills/ unless skills.external_dirs lists it.
+        hermes)                                 bucket=".hermes/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then printf '%s/%s' "$DEST" "$bucket"
@@ -256,10 +262,10 @@ prompt_for_clis() {
         echo "  2) opencode  → ~/.config/opencode/"
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
-        echo "  5) gemini    → ~/.gemini/         (deprecated for consumers after 2026-06-18)"
-        echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — nests under ~/.gemini/)"
-        echo "  7) pi        → ~/.pi/agent/       (agents need the subagent extension)"
-        echo "  8) cursor    → ~/.cursor/         (rules-as-MDC)"
+        echo "  5) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI)"
+        echo "  6) pi        → ~/.pi/agent/       (agents need the subagent extension)"
+        echo "  7) cursor    → ~/.cursor/         (rules-as-MDC)"
+        echo "  8) hermes    → ~/.hermes/         (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -273,11 +279,11 @@ prompt_for_clis() {
             2) mapped="${mapped:+$mapped,}opencode" ;;
             3) mapped="${mapped:+$mapped,}kilo" ;;
             4) mapped="${mapped:+$mapped,}codex" ;;
-            5) mapped="${mapped:+$mapped,}gemini" ;;
-            6) mapped="${mapped:+$mapped,}agy" ;;
-            7) mapped="${mapped:+$mapped,}pi" ;;
-            8) mapped="${mapped:+$mapped,}cursor" ;;
-            claude|opencode|kilo|codex|gemini|agy|pi|cursor) mapped="${mapped:+$mapped,}$t" ;;
+            5) mapped="${mapped:+$mapped,}agy" ;;
+            6) mapped="${mapped:+$mapped,}pi" ;;
+            7) mapped="${mapped:+$mapped,}cursor" ;;
+            8) mapped="${mapped:+$mapped,}hermes" ;;
+            claude|opencode|kilo|codex|agy|pi|cursor|hermes) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
@@ -421,7 +427,7 @@ agent_is_dir_form() {
 # references/ subdirectory would never be read at all.
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|agy|cursor|pi) return 0 ;;
+        opencode|kilo|agy|cursor|pi) return 0 ;;
         *) return 1 ;;
     esac
 }

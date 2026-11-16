@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: "Get a second-opinion review from a different AI model — dispatches a review skill (deep-review, branch-review, bdd-audit, honesty-audit, counter-patterns, coverage-audit) to a different CLI (codex, gemini, opencode, crush, kilo) via the AdversarialReviewMCP server. Use when the user asks for 'external review', 'adversarial review', 'second opinion', 'different model review', 'check this with another model', or before merging anything on a load-bearing surface (security, auth, deploy pipeline, persistence, multi-agent orchestration) where self-review's 80% catch rate isn't enough. Requires the AdversarialReviewMCP server to be installed and registered with this CLI (one-time setup; see step 1 below)."
+description: "Get a second-opinion review from a different AI model — dispatches a review skill (deep-review, branch-review, bdd-audit, honesty-audit, counter-patterns, coverage-audit) to a different CLI (codex, opencode, crush, kilo) via the AdversarialReviewMCP server. Use when the user asks for 'external review', 'adversarial review', 'second opinion', 'different model review', 'check this with another model', or before merging anything on a load-bearing surface (security, auth, deploy pipeline, persistence, multi-agent orchestration) where self-review's 80% catch rate isn't enough. Requires the AdversarialReviewMCP server to be installed and registered with this CLI (one-time setup; see step 1 below)."
 ---
 
 # Adversarial Review
@@ -22,14 +22,14 @@ requested review. The server lives in its own repository:
    ```bash
    git clone https://github.com/AI-Strategy-LLC/AdversarialReviewMCP
    cd AdversarialReviewMCP
-   bash install.sh --for claude     # (or --for codex, gemini, cursor, …)
+   bash install.sh --for claude     # (or --for codex, cursor, …)
    ```
 
 2. **Confirm at least one reviewer is installed and authenticated.** From
    `list_reviewers`, surface any reviewer with `installed: false` or
    `authenticated: false` — the user must install/log in to a reviewer CLI
    different from the one running this session. (If Claude is the host, the
-   reviewer should NOT be Claude; pick codex / gemini / crush / opencode /
+   reviewer should NOT be Claude; pick codex / crush / opencode /
    kilo.)
 
 3. **Pick the skill.** Translate the user's intent:
@@ -41,7 +41,7 @@ requested review. The server lives in its own repository:
    - "test coverage gaps / how covered is X" → `coverage-audit`
 
 4. **Pick the reviewer.** Use whatever the user named, OR `auto` if
-   unspecified. Auto-fallback order: codex → gemini → crush → opencode → kilo.
+   unspecified. Auto-fallback order: codex → crush → opencode → kilo.
 
 5. **Call the MCP tool.** Either `adversarial_review` with `skill=` /
    `reviewer=` / `repo_path=` (absolute), or one of the per-skill convenience
@@ -86,9 +86,6 @@ Direct the user to install at least one:
 ```bash
 # Codex (OpenAI)
 brew install openai/codex/codex   # or: npm i -g @openai/codex
-
-# Gemini (Google)
-npm install -g @google/gemini-cli
 
 # Crush (Charm — multi-provider)
 brew install charmbracelet/tap/crush
