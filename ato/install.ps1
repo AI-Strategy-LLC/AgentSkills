@@ -15,7 +15,7 @@
 
 .PARAMETER For
     Comma-separated list of CLIs. Any of:
-    claude, opencode, kilo, codex, gemini, agy, pi, cursor.
+    claude, opencode, kilo, codex, agy, pi, cursor, hermes.
 
 .PARAMETER Ref
     Git ref to install when fetching remotely. Default: main.

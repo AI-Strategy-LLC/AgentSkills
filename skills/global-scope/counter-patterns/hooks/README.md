@@ -8,7 +8,7 @@ end-of-task / resume / checkpoint moments.
 
 ## Compatibility
 
-**Claude Code only.** Other CLIs (OpenCode, Kilo, OpenAI Codex, Gemini, Pi) do
+**Claude Code only.** Other CLIs (OpenCode, Kilo, OpenAI Codex, Antigravity, Pi, Hermes) do
 not currently expose the same `SessionStart` / `UserPromptSubmit` / `PreToolUse`
 / `Stop` hook surface, so these scripts will not run there. The skill body
 (SKILL.md, counter-patterns.yaml) remains portable across CLIs even though

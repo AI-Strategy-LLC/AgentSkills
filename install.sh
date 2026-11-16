@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh — install AgentSkills' global-scope artifacts for one or more
-# AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI,
+# AI coding CLIs (Claude Code, OpenCode, Kilo Code, OpenAI Codex, Pi, Cursor, Crush, Hermes,
 # Antigravity CLI).
 #
 # Usage (one-liner — no clone required):
@@ -68,7 +68,7 @@ fi
 REPO="${AGENT_SKILLS_REPO:-AI-Strategy-LLC/AgentSkills}"
 REF="${AGENT_SKILLS_REF:-release}"
 DEST="${AGENT_SKILLS_DEST:-}"                         # unset = each CLI uses its native root
-FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,gemini,agy
+FOR_LIST="${AGENT_SKILLS_FOR:-}"                      # CSV: claude,opencode,kilo,codex,agy,pi,cursor,crush,hermes
 FROM_LOCAL="${AGENT_SKILLS_FROM:-}"                   # local path to source tree (skips fetch)
 ACTION="install"
 ASSUME_YES=0
@@ -83,7 +83,7 @@ CP_EXPLICIT=0                                          # user passed at least on
 
 MANIFEST_NAME="installer-manifest.json"
 
-SUPPORTED_CLIS="claude opencode kilo codex gemini agy pi cursor crush"
+SUPPORTED_CLIS="claude opencode kilo codex agy pi cursor crush hermes"
 
 # ---- usage ----------------------------------------------------------------
 usage() {
@@ -99,11 +99,11 @@ Required:
                         opencode   → ~/.config/opencode/
                         kilo       → ~/.config/kilo/
                         codex      → ~/.codex/
-                        gemini     → ~/.gemini/     (deprecated for consumers after 2026-06-18; enterprise OK)
-                        agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — replaces Gemini CLI; shares the ~/.gemini/ root)
+                        agy        → ~/.gemini/antigravity-cli/  (Antigravity CLI — nests under the legacy ~/.gemini/ root)
                         pi         → ~/.pi/agent/   (agents need the subagent extension — see pi/README.md)
                         cursor     → ~/.cursor/     (rules-as-MDC; see CLAUDE.md)
                         crush      → ~/.config/crush/ (skills only — Crush agents live in crush.json)
+                        hermes     → ~/.hermes/     (skills only — Hermes delegates via delegate_task, no agent files)
                       If omitted, a TTY prompt asks multi-select. In non-TTY
                       mode (e.g. pipe into sh -c) --for is required.
 
@@ -213,24 +213,26 @@ cli_root() {
         opencode) printf '%s/opencode' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
         kilo)     printf '%s/.config/kilo' "$HOME" ;;
         codex)    printf '%s/.codex' "$HOME" ;;
-        gemini)   printf '%s/.gemini' "$HOME" ;;
-        # Antigravity CLI deliberately nests under ~/.gemini/ — the two CLIs
-        # share a core agent engine and the same on-disk root. agy reads
+        # Antigravity CLI deliberately nests under ~/.gemini/ (the root of the
+        # retired Gemini CLI, whose core agent engine it inherited). agy reads
         # agents from ~/.gemini/antigravity-cli/agents/, NOT from a top-level
         # ~/.antigravity/ (that path belongs to the Antigravity desktop app).
         agy)      printf '%s/.gemini/antigravity-cli' "$HOME" ;;
         pi)       printf '%s/.pi/agent' "$HOME" ;;
         cursor)   printf '%s/.cursor' "$HOME" ;;
         crush)    printf '%s/crush' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
+        hermes)   printf '%s/.hermes' "$HOME" ;;
         *) die "unknown CLI: $cli" ;;
     esac
 }
 
 # Some CLIs only consume skills — they have no subagent concept and so the
-# installer should skip the agent rendering loop for them entirely. Crush
-# (charmbracelet/crush) is the only one left: its `Agent` type is a JSON
-# struct declared inline in crush.json, with no file-based subagent directory
-# and no extension API to add one.
+# installer should skip the agent rendering loop for them entirely.
+#   - Crush (charmbracelet/crush): its `Agent` type is a JSON struct declared
+#     inline in crush.json, with no file-based subagent directory and no
+#     extension API to add one.
+#   - Hermes Agent (NousResearch): subagents are spawned at runtime through
+#     the built-in `delegate_task` tool; there is no on-disk agent definition.
 #
 # Pi used to be in this list. It no longer is. Pi core ships no subagent
 # concept, but it has a first-class extension API and bundles a complete
@@ -240,7 +242,7 @@ cli_root() {
 # for Pi is worth doing. Without it the rendered agents are inert but harmless.
 cli_has_agents() {
     case "$1" in
-        crush) return 1 ;;
+        crush|hermes) return 1 ;;
         *)     return 0 ;;
     esac
 }
@@ -268,7 +270,7 @@ cli_agents_subdir() {
 
 # cli_skills_dir <cli>
 # Where to physically install global skills for a given CLI. Four CLIs
-# (opencode, kilo, gemini, codex) all auto-discover ~/.agents/skills/ as a
+# (opencode, kilo, codex) all auto-discover ~/.agents/skills/ as a
 # cross-CLI compatibility location, so we install once into ~/.agents/skills/
 # and let those CLIs pick it up. Claude is the only CLI that doesn't scan
 # ~/.agents/, so it gets its own dir. Result: at most TWO physical copies
@@ -285,7 +287,7 @@ cli_skills_dir() {
     local cli="$1" bucket
     case "$cli" in
         claude)                                 bucket=".claude/skills" ;;
-        opencode|kilo|gemini|codex|pi|cursor)   bucket=".agents/skills" ;;
+        opencode|kilo|codex|pi|cursor)          bucket=".agents/skills" ;;
         # Antigravity reads ~/.gemini/antigravity-cli/skills/ AND ~/.gemini/
         # skills/ AND (per its docs) ~/.agents/skills/ — but the last one
         # currently doesn't surface skills in practice. Pin to the agy-
@@ -299,6 +301,11 @@ cli_skills_dir() {
         # it gets a distinct dedup bucket. Source:
         # charmbracelet/crush internal/config/load.go GlobalSkillsDirs().
         crush)                                  bucket=".config/agents/skills" ;;
+        # Hermes Agent scans ~/.hermes/skills/ recursively for SKILL.md and
+        # does NOT read ~/.agents/skills/ unless `skills.external_dirs` in
+        # ~/.hermes/config.yaml lists it. Pin to its native directory so the
+        # install works with no user config.
+        hermes)                                 bucket=".hermes/skills" ;;
         *) die "unknown CLI: $cli" ;;
     esac
     if [ -n "$DEST" ]; then
@@ -336,11 +343,11 @@ prompt_for_clis() {
         echo "  2) opencode  → ~/.config/opencode/"
         echo "  3) kilo      → ~/.config/kilo/"
         echo "  4) codex     → ~/.codex/"
-        echo "  5) gemini    → ~/.gemini/                  (deprecated for consumers after 2026-06-18)"
-        echo "  6) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI — replaces Gemini CLI; nests under ~/.gemini/)"
-        echo "  7) pi        → ~/.pi/agent/                 (agents need the subagent extension)"
-        echo "  8) cursor    → ~/.cursor/                   (rules-as-MDC)"
-        echo "  9) crush     → ~/.config/crush/             (skills only)"
+        echo "  5) agy       → ~/.gemini/antigravity-cli/   (Antigravity CLI)"
+        echo "  6) pi        → ~/.pi/agent/                 (agents need the subagent extension)"
+        echo "  7) cursor    → ~/.cursor/                   (rules-as-MDC)"
+        echo "  8) crush     → ~/.config/crush/             (skills only)"
+        echo "  9) hermes    → ~/.hermes/                   (skills only)"
         printf 'Enter comma-separated numbers or names (e.g. "1,2" or "claude,opencode"): '
     } > "$tty"
     local ans; ans=$(tty_read) || return 1
@@ -355,12 +362,12 @@ prompt_for_clis() {
             2) mapped="${mapped:+$mapped,}opencode" ;;
             3) mapped="${mapped:+$mapped,}kilo" ;;
             4) mapped="${mapped:+$mapped,}codex" ;;
-            5) mapped="${mapped:+$mapped,}gemini" ;;
-            6) mapped="${mapped:+$mapped,}agy" ;;
-            7) mapped="${mapped:+$mapped,}pi" ;;
-            8) mapped="${mapped:+$mapped,}cursor" ;;
-            9) mapped="${mapped:+$mapped,}crush" ;;
-            claude|opencode|kilo|codex|gemini|agy|pi|cursor|crush) mapped="${mapped:+$mapped,}$t" ;;
+            5) mapped="${mapped:+$mapped,}agy" ;;
+            6) mapped="${mapped:+$mapped,}pi" ;;
+            7) mapped="${mapped:+$mapped,}cursor" ;;
+            8) mapped="${mapped:+$mapped,}crush" ;;
+            9) mapped="${mapped:+$mapped,}hermes" ;;
+            claude|opencode|kilo|codex|agy|pi|cursor|crush|hermes) mapped="${mapped:+$mapped,}$t" ;;
             *) echo "ignored: $t" > "$tty" ;;
         esac
     done
@@ -508,7 +515,7 @@ agent_is_dir_form() {
 # cite files that, from its point of view, do not exist.
 cli_uses_flat_only() {
     case "$1" in
-        opencode|kilo|gemini|agy|cursor|pi) return 0 ;;
+        opencode|kilo|agy|cursor|pi) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -562,7 +569,7 @@ list_install_set() {
         fi
     done
 
-    # Note: opencode/kilo/gemini/agy share ~/.agents/skills/ — listed per CLI
+    # Note: opencode/kilo/agy share ~/.agents/skills/ — listed per CLI
     # above for clarity, but install.sh writes that directory only once.
 
     if [ -n "$CP_BLOCK_MODE" ] || [ "$CP_HOOKS_INSTALL" = 1 ]; then
@@ -609,7 +616,7 @@ install_cli() {
 
     # Note: skills are installed by install_skills_dedup() in the main loop,
     # not here. Each CLI's skills directory is computed by cli_skills_dir,
-    # and opencode/kilo/gemini/agy share ~/.agents/skills/ — installing per-CLI
+    # and opencode/kilo/agy share ~/.agents/skills/ — installing per-CLI
     # would write that directory four times. The dedup helper writes each
     # unique skills directory exactly once.
 
@@ -631,7 +638,7 @@ install_cli() {
         else
             # Flat form: single file at <cli-root>/<adir>/<name>.<ext>.
             # The rm -rf cleans up any residual directory-form layout from a
-            # previous install (important after switching opencode/kilo/gemini
+            # previous install (important after switching opencode/kilo
             # away from directory form).
             rm -rf "$root/$adir/$name"
             "$renderer" "$d" > "$root/$adir/$name.$ext"
@@ -645,7 +652,7 @@ install_cli() {
 }
 
 # ---- install skills (deduped across CLIs) ---------------------------------
-# Walk $CLIS, build the set of unique skills directories (opencode/kilo/gemini
+# Walk $CLIS, build the set of unique skills directories (opencode/kilo
 # all map to ~/.agents/skills/), and write each one exactly once. Echoes the
 # unique directories to stdout, one per line, so the caller can log them.
 install_skills_dedup() {
@@ -1239,7 +1246,7 @@ case "$ACTION" in
             install_cli "$cli"
         done
 
-        # Skills install once per unique physical path (opencode/kilo/gemini/agy
+        # Skills install once per unique physical path (opencode/kilo/agy
         # all share ~/.agents/skills/).
         echo "Installing skills …"
         install_skills_dedup | while read -r installed_path; do

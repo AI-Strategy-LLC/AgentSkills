@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A collection of **multi-CLI AI skills and agents** for Claude Code, OpenCode, Kilo Code, OpenAI Codex, Gemini CLI, and Antigravity CLI (`agy`). Skills (stateless step-by-step guides surfaced by description) live under `skills/`; agents (isolated-context subprocesses) live under `agents/`. Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time.
+A collection of **multi-CLI AI skills and agents** for Claude Code, OpenCode, Kilo Code, OpenAI Codex, Antigravity CLI (`agy`), Pi, Cursor, Crush, and Hermes Agent (skills only). Skills (stateless step-by-step guides surfaced by description) live under `skills/`; agents (isolated-context subprocesses) live under `agents/`. Each agent is authored once in a CLI-agnostic base form and rendered to each CLI's native format at install time.
 
 Both trees are split into **`global-scope/`** (user-level, installed once per CLI into each CLI's global directory — available in every repo) and **`repo-scope/`** (per-repo, installed by `skill-sync` into each CLI's per-repo directory only when the toolchain matches).
 
@@ -18,7 +18,7 @@ agents/
   base/              # canonical, CLI-agnostic agent source (body + metadata.yaml)
     global-scope/
     repo-scope/
-  renderers/         # per-CLI transformers: claude.sh, opencode.sh, kilo.sh, gemini.sh, codex.sh
+  renderers/         # per-CLI transformers: claude.sh, opencode.sh, kilo.sh, agy.sh, codex.sh
                      # + codex-agents-md.sh for the Codex AGENTS.md inventory
 install.sh           # per-CLI installer with --for <cli>[,<cli>...]
 CLAUDE.md            # this file
@@ -36,10 +36,10 @@ A paired stub and agent live in matching scopes — if the stub is global, the a
 | OpenCode | `~/.config/opencode/agents/` | `~/.agents/skills/` (shared) | `<repo>/.opencode/` | `<name>.md` (MD + YAML, no name) | filename |
 | Kilo Code | `~/.config/kilo/agent/` (singular per Kilo docs) | `~/.agents/skills/` (shared) | `<repo>/.kilo/` | `<name>.md` (MD + YAML, no name) | filename |
 | OpenAI Codex | `~/.codex/agents/` | `~/.agents/skills/` (shared) | `<repo>/.codex/` | `<name>.toml` + `AGENTS.md` | TOML `name =` |
-| Gemini CLI | `~/.gemini/agents/` | `~/.agents/skills/` (shared) | `<repo>/.gemini/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/agents/` (nests under `~/.gemini/`) | `~/.gemini/antigravity-cli/skills/` (also reads `~/.gemini/skills/`; the docs claim `~/.agents/skills/` works but it currently doesn't surface) | `<repo>/.gemini/antigravity-cli/` (extrapolated; unverified) | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Pi (pi.dev) | `~/.pi/agent/agents/` *(needs the subagent extension)* | `~/.agents/skills/` (shared) | `<repo>/.pi/` and `<repo>/.agents/skills/` | `<name>.md` (MD + YAML) | frontmatter `name:` |
 | Cursor | `~/.cursor/agents/` | `~/.agents/skills/` (shared) | `<repo>/.cursor/` | `<name>.mdc` (MDC + YAML) | filename |
+| Hermes Agent | — *(no file-based agents; uses `delegate_task`)* | `~/.hermes/skills/` | — *(none; skipped by `skill-sync`)* | `SKILL.md` only | frontmatter `name:` |
 | Crush | — *(no subagents)* | `~/.config/agents/skills/` (XDG-shared) | `<repo>/.crush/` and `<repo>/.agents/skills/` | `SKILL.md` only | frontmatter `name:` |
 
 The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept a multi-CLI selection. The user chooses which CLIs to install for; each selected CLI gets its own correctly-shaped copy of every agent (where applicable — Pi has only skills).
@@ -48,14 +48,15 @@ The installer (`install.sh --for <cli>[,<cli>...]`) and `skill-sync` both accept
 
 **Native Windows support.** `install.ps1` (and `ato/install.ps1`) are PowerShell wrappers that detect Git Bash, offer to install Git for Windows via `winget` (or Chocolatey, or a manual download fallback), and forward args to the bash installers. Git Bash provides bash + curl + tar + the rest of the POSIX toolset the installer needs, and handles the Windows-path translation transparently. CLI directories follow the same `~/.<cli>/` convention — `~` resolves to `%USERPROFILE%` (e.g. `C:\Users\<name>\.claude\`).
 
-**Skill placement (strategy A — single canonical location per scan-group, lean on cross-scan):** Four dedup buckets exist:
+**Skill placement (strategy A — single canonical location per scan-group, lean on cross-scan):** Five dedup buckets exist:
 
 - `~/.claude/skills/` — Claude Code only (it doesn't scan the cross-CLI paths).
-- `~/.agents/skills/` — OpenCode, Kilo, Gemini, Codex, Pi, Cursor (HOME-dot-prefixed cross-CLI compat path).
+- `~/.agents/skills/` — OpenCode, Kilo, Codex, Pi, Cursor (HOME-dot-prefixed cross-CLI compat path).
 - `~/.config/agents/skills/` — Crush (XDG-rooted cross-CLI path per Crush's `GlobalSkillsDirs()`; Crush does not scan `~/.agents/skills/`).
+- `~/.hermes/skills/` — Hermes Agent (scans it recursively; it reads `~/.agents/skills/` only if `skills.external_dirs` in `~/.hermes/config.yaml` lists it, so we pin to the native path).
 - `~/.gemini/antigravity-cli/skills/` — Antigravity (`agy`). Antigravity's docs claim `~/.agents/skills/` works as a cross-CLI shared location but in practice it currently doesn't surface; pin to the agy-specific path until Google fixes that bug. When fixed, fold `agy` back into the `~/.agents/skills/` bucket.
 
-`install.sh` writes each unique skills directory exactly once per install. Result: **at most four physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
+`install.sh` writes each unique skills directory exactly once per install. Result: **at most five physical copies of any skill on disk regardless of how many CLIs are selected**, and no within-CLI duplicates — important for Codex specifically, which scans both `~/.codex/skills/` and `~/.agents/skills/` and would surface every skill twice if we wrote to both.
 
 **Pi subagents come from an extension, not from core.** Pi (pi.dev, npm `@earendil-works/pi-coding-agent` — *not* `@mariozechner/pi`, which is an unrelated vLLM CLI; repo `earendil-works/pi`) deliberately excludes subagents, MCP, plan mode and to-dos from core, but it has a first-class extension API *and ships a complete subagent implementation as a bundled example*. `pi/install-subagent-extension.sh` copies that example into `~/.pi/agent/extensions/subagent/`, which registers a `subagent` tool that reads agents from `~/.pi/agent/agents/*.md`. So the installer renders agents for Pi like any other CLI (`cli_has_agents pi` now returns true). Without the extension the rendered agents are inert but harmless. Full detail — including the two npm/GitHub naming traps and the third-party package landscape — is in `pi/README.md`.
 
@@ -63,7 +64,7 @@ Four Pi-specific rendering constraints, each verified against Pi's loader (`exam
 
 - **`tools:` is a comma-separated string, not a YAML list** — the loader does `frontmatter.tools?.split(",")`. `tools_for_pi()` in `_lib.sh` emits the string form.
 - **Unmapped tool names must be dropped, not passed through.** The list becomes `pi --tools <list>` on the spawned subprocess; an unrecognized name fails that subprocess outright. `Skill`/`WebFetch`/`WebSearch` are dropped; `Glob→find`; `Agent→subagent` (kept, so `deep-review`'s fan-out stays wired — nesting works because children spawn without `--no-extensions`).
-- **`model:` is not emitted**, same rationale as Gemini/Codex: Pi passes it to `pi --model`, which needs a concrete provider ID, not our `opus`/`sonnet`/`haiku` aliases.
+- **`model:` is not emitted**, same rationale as Antigravity/Codex: Pi passes it to `pi --model`, which needs a concrete provider ID, not our `opus`/`sonnet`/`haiku` aliases.
 - **Flat form with references inlined** — `loadAgentsFromDir()` is a single non-recursive `readdirSync()` over `*.md`, so a bundled `references/` dir is never read. Hence `pi` is in `cli_uses_flat_only`.
 
 **Pi's loader has no `try`/`catch` around `parseFrontmatter`** — one agent with invalid YAML kills discovery for *every* agent. `agents/renderers/tests/smoke.sh` validates every rendered agent against Pi's own parser when Pi is installed locally; keep that test green.
@@ -72,9 +73,11 @@ Four Pi-specific rendering constraints, each verified against Pi's loader (`exam
 
 **Crush has no subagents either.** Crush (`charmbracelet/crush`) is skills-only from this installer's perspective: its `Agent` type is a JSON struct defined inline in `crush.json` under the `agents` key, with no equivalent of `~/.claude/agents/<name>.md` file-based subagents. Skills come from `$CRUSH_SKILLS_DIR`, `~/.config/crush/skills/`, `~/.config/agents/skills/`, and the project-local `.crush/skills`, `.agents/skills`, `.claude/skills`, `.cursor/skills`. The installer writes once to `~/.config/agents/skills/` (the cross-CLI XDG path) and `cli_has_agents crush` returns false — it is now the only CLI for which that is true. Thin-stub skills whose bodies delegate to an agent still surface in Crush; they are written in CLI-neutral language ("use this harness's subagent mechanism … if it has none, follow the agent's instructions inline"), so in Crush they degrade to running the steps inline rather than erroring.
 
-**Flat-only agent shape for OpenCode / Kilo / Gemini / Antigravity.** Those four CLIs recursively scan their `agents/` directory and register every `.md` file as an agent — including bundled `references/*.md`, which then surface as broken namespaced agents. To avoid that, the renderers for those CLIs **inline bundled references into the agent body** (via `_lib.sh::inline_references`) and the installer always writes them as flat `<name>.md` files. Claude and Codex preserve directory form because they don't have the same scanning trap. Antigravity inherits this behavior from Gemini because they share a core agent engine.
+**Flat-only agent shape for OpenCode / Kilo / Antigravity.** Those three CLIs recursively scan their `agents/` directory and register every `.md` file as an agent — including bundled `references/*.md`, which then surface as broken namespaced agents. To avoid that, the renderers for those CLIs **inline bundled references into the agent body** (via `_lib.sh::inline_references`) and the installer always writes them as flat `<name>.md` files. Claude and Codex preserve directory form because they don't have the same scanning trap.
 
-**Antigravity inherits Gemini's agent engine.** Per the official `google-antigravity/antigravity-cli` README, *"Both interfaces run on the same core agent engine."* In practice that means the frontmatter schema, the tool-name registry (`run_shell_command`, `read_file`, `replace`, `grep_search`, `glob`, `activate_skill`, `invoke_agent`, …), and the template-placeholder validator are all shared. The Antigravity renderer (`agents/renderers/agy.sh`) reuses the gemini-specific helpers in `_lib.sh` rather than duplicating them. If Antigravity's engine ever diverges, fork the helpers; until then, anything that fixes a load-bearing detail for Gemini fixes it for Antigravity too.
+**Antigravity inherited the retired Gemini CLI's agent engine.** The Gemini CLI is no longer a supported target (its renderer was removed); Antigravity replaces it. Antigravity still shares that engine's frontmatter schema, tool-name registry (`run_shell_command`, `read_file`, `replace`, `grep_search`, `glob`, `activate_skill`, `invoke_agent`, …), and template-placeholder validator. The `tools_for_agy` and `agy_escape_placeholders` helpers in `_lib.sh` encode those rules for `agents/renderers/agy.sh`.
+
+**Hermes Agent is skills-only.** Hermes (NousResearch, `~/.hermes/`) spawns subagents at runtime through its built-in `delegate_task` tool; it has no file-based agent definitions, so `cli_has_agents hermes` returns false and thin-stub skills degrade to running the agent's steps inline (same as Crush). Skills install to `~/.hermes/skills/` (Hermes walks it recursively for `SKILL.md`). Per-repo: Hermes has no project skills dir, so `skill-sync` skips it.
 
 **Antigravity directory layout (verified 2026-05-19 against a working `agy` install).** Antigravity literally lives *under* `~/.gemini/`:
 
@@ -97,7 +100,7 @@ description: "One-line hook the harness uses to decide when to surface this skil
 Body: step-by-step instructions, tables, shell snippets.
 ```
 
-- `name` is **required** and must match the directory name. Claude Code will fall back to the directory name if absent, but OpenCode, Kilo, Codex, and Gemini all require it explicitly per the agent-skills spec — keep it present so a single SKILL.md works across every CLI.
+- `name` is **required** and must match the directory name. Claude Code will fall back to the directory name if absent, but OpenCode, Kilo, Codex, and Antigravity all require it explicitly per the agent-skills spec — keep it present so a single SKILL.md works across every CLI.
 - `description` is **required** and is the field the harness matches against. Write it as a trigger sentence — lead with what the skill does, then when to use it. Keep it on a single line (Codex's loader has been observed to mishandle folded `>` and literal `|` YAML scalars in some versions); single-quoted scalars are the safe default. Description max length per the spec is 1024 chars.
 - The directory name is the canonical skill identifier.
 - Skills may carry supporting material in sibling folders (e.g. `references/`). Reference those from `SKILL.md` using relative paths.
@@ -112,9 +115,9 @@ Every `agents/base/<scope>/<name>/` directory contains:
 agents/base/<scope>/<name>/
   agent.md              # prompt body — no frontmatter
   metadata.yaml         # canonical metadata (name, description, tools, model, extras.*)
-  references/           # optional — copied verbatim for Claude/Codex; inlined into the rendered agent body for OpenCode/Kilo/Gemini
-  evals/                # optional — copied verbatim for Claude/Codex; not installed for OpenCode/Kilo/Gemini
-  config.yaml           # optional — copied verbatim for Claude/Codex; not installed for OpenCode/Kilo/Gemini
+  references/           # optional — copied verbatim for Claude/Codex; inlined into the rendered agent body for OpenCode/Kilo/Antigravity
+  evals/                # optional — copied verbatim for Claude/Codex; not installed for OpenCode/Kilo/Antigravity
+  config.yaml           # optional — copied verbatim for Claude/Codex; not installed for OpenCode/Kilo/Antigravity
 ```
 
 `metadata.yaml` shape:
@@ -133,11 +136,11 @@ extras:                                        # optional per-CLI hints
     sandbox_mode: read-only                    # or workspace-write for agents that write files
 ```
 
-`model:` is authored using the canonical Claude aliases (`opus` / `sonnet` / `haiku` / `inherit`). Only the Claude renderer emits the value verbatim — Claude understands those aliases natively. The OpenCode, Kilo, Gemini, and Codex renderers **drop the field** because each of those CLIs expects its own provider/model-id format and would reject a bare alias. Subagents inherit the invoker's model when `model:` is absent, which is the right default — the user picks the model in their CLI's global config rather than having every agent hard-code one.
+`model:` is authored using the canonical Claude aliases (`opus` / `sonnet` / `haiku` / `inherit`). Only the Claude renderer emits the value verbatim — Claude understands those aliases natively. The OpenCode, Kilo, Antigravity, and Codex renderers **drop the field** because each of those CLIs expects its own provider/model-id format and would reject a bare alias. Subagents inherit the invoker's model when `model:` is absent, which is the right default — the user picks the model in their CLI's global config rather than having every agent hard-code one.
 
 At install time, each renderer at `agents/renderers/<cli>.sh` reads the agent's base directory and emits the CLI's native format:
 
-- `claude.sh` / `gemini.sh` → Markdown with `name:` frontmatter
+- `claude.sh` / `agy.sh` → Markdown with `name:` frontmatter
 - `opencode.sh` / `kilo.sh` → Markdown without `name:` (filename is authoritative); adds `mode:`
 - `codex.sh` → TOML with `developer_instructions = '''<body>'''`
 - `codex-agents-md.sh` → `AGENTS.md` inventory listing every installed agent
@@ -145,7 +148,7 @@ At install time, each renderer at `agents/renderers/<cli>.sh` reads the agent's 
 **Agent shape per CLI:**
 
 - **Claude / Codex** — agents that bundle `references/`, `evals/`, or `config.yaml` install as directory-form (`<cli-root>/agents/<name>/<name>.<ext>`) so the bundled files sit alongside the rendered agent. Simple agents land flat.
-- **OpenCode / Kilo / Gemini** — always flat (`<cli-root>/agents/<name>.<ext>`), regardless of base shape. Those CLIs recursively scan their `agents/` directory and would register every reference `.md` as a broken namespaced agent. Bundled `references/*.md` are inlined into the rendered agent body via `_lib.sh::inline_references` so the agent stays self-contained; `evals/` and `config.yaml` are not installed for these CLIs (they are dev-loop artifacts, not runtime inputs).
+- **OpenCode / Kilo / Antigravity** — always flat (`<cli-root>/agents/<name>.<ext>`), regardless of base shape. Those CLIs recursively scan their `agents/` directory and would register every reference `.md` as a broken namespaced agent. Bundled `references/*.md` are inlined into the rendered agent body via `_lib.sh::inline_references` so the agent stays self-contained; `evals/` and `config.yaml` are not installed for these CLIs (they are dev-loop artifacts, not runtime inputs).
 
 **Shape rule:** the rendered frontmatter is CLI-specific, but the body (`agent.md`) is identical across CLIs. When editing an agent, edit `agent.md` — do not touch the rendered output in any CLI install tree. When adding a field that matters for only one CLI, put it under `extras.<cli>.` in `metadata.yaml` and teach that CLI's renderer to honor it.
 

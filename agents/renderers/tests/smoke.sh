@@ -40,20 +40,8 @@ grep -q '^tools:$' <<<"$out" || fail "kilo: tools should be a record"
 grep -q '^  bash: true$' <<<"$out" || fail "kilo: expected 'bash: true' under tools"
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "kilo: body missing"
 
-out=$("$renderers/gemini.sh" "$base")
-grep -q '^name: branch-review$' <<<"$out" || fail "gemini: missing name"
-# `model:` is intentionally NOT emitted — Gemini expects Gemini-family IDs,
-# not our canonical Claude aliases; omitting it defaults to `inherit`.
-! grep -q '^model:' <<<"$out" || fail "gemini: must not emit model (Claude aliases are invalid Gemini IDs)"
-grep -q '^tools:$' <<<"$out" || fail "gemini: tools should be a block sequence (header on its own line)"
-! grep -q '^tools: \[' <<<"$out" || fail "gemini: tools must be mapped names, not the canonical [Bash, ...] list"
-grep -q '^  - run_shell_command$' <<<"$out" || fail "gemini: expected 'Bash' mapped to 'run_shell_command'"
-grep -q '^## Step 1 — Gather' <<<"$out" || fail "gemini: body missing"
-
-# Antigravity (`agy`) inherits Gemini's agent engine (shared core per the
-# official google-antigravity/antigravity-cli README), so the renderer reuses
-# tools_for_gemini + gemini_escape_placeholders verbatim. Output must be
-# byte-identical to gemini's so any regression there is caught here too.
+# Antigravity (`agy`) uses a registered-tool-name `tools:` block sequence and
+# rejects `model:` values that aren't its own IDs.
 out=$("$renderers/agy.sh" "$base")
 grep -q '^name: branch-review$' <<<"$out" || fail "agy: missing name"
 ! grep -q '^model:' <<<"$out" || fail "agy: must not emit model (Claude aliases are invalid in Antigravity)"
@@ -61,8 +49,6 @@ grep -q '^tools:$' <<<"$out" || fail "agy: tools should be a block sequence (hea
 ! grep -q '^tools: \[' <<<"$out" || fail "agy: tools must be mapped names, not the canonical [Bash, ...] list"
 grep -q '^  - run_shell_command$' <<<"$out" || fail "agy: expected 'Bash' mapped to 'run_shell_command'"
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "agy: body missing"
-diff <("$renderers/gemini.sh" "$base") <("$renderers/agy.sh" "$base") >/dev/null \
-    || fail "agy: output must be byte-identical to gemini's (shared core agent engine)"
 
 # Pi renders for the subagent extension (pi/install-subagent-extension.sh).
 # Its loader reads `tools` as a comma-separated STRING and splits on "," —
@@ -144,22 +130,22 @@ grep -qF "developer_instructions = '''" <<<"$out" || fail "codex: missing develo
 grep -q '^## Step 1 — Gather' <<<"$out" || fail "codex: body missing"
 tail -n 1 <<<"$out" | grep -qF "'''" || fail "codex: missing developer_instructions closer"
 
-# Gemini template-placeholder escape: deep-review's body and references
+# Antigravity template-placeholder escape: deep-review's body and references
 # legitimately contain literal `${VAR}` and `${X}` in markdown (documenting
 # the shell-style interpolation failure mode the agent is supposed to look
-# for). Gemini's agent loader treats any `${WORD}` in the rendered body as
+# for). Antigravity's agent loader treats any `${WORD}` in the rendered body as
 # a required input and refuses to load the agent — there is no escape syntax.
-# gemini_escape_placeholders inserts U+200B between `$` and `{` so the
+# agy_escape_placeholders inserts U+200B between `$` and `{` so the
 # regex /\$\{(\w+)\}/g fails to match. Confirm:
 #   1) The rendered body still contains a `${...}` pattern (so the docs
 #      survive — the ZWSP only breaks the regex, not the visible text).
-#   2) The regex Gemini actually applies matches zero placeholders.
-out=$("$renderers/gemini.sh" "$renderers/../base/global-scope/deep-review")
+#   2) The regex Antigravity actually applies matches zero placeholders.
+out=$("$renderers/agy.sh" "$renderers/../base/global-scope/deep-review")
 # The placeholder text must still be present — only the `${` adjacency is
 # broken by a ZWSP. We assert the var name + close brace survive (a strict
 # "${VAR}" grep would falsely fail because of the inserted ZWSP).
-grep -q 'VAR}' <<<"$out" || fail "gemini: deep-review body lost its \${VAR} documentation"
-grep -q '{X}' <<<"$out" || fail "gemini: deep-review languages.md lost its \${X} example"
+grep -q 'VAR}' <<<"$out" || fail "agy: deep-review body lost its \${VAR} documentation"
+grep -q '{X}' <<<"$out" || fail "agy: deep-review languages.md lost its \${X} example"
 matches=$(printf '%s' "$out" | awk '
     BEGIN { count = 0 }
     {
@@ -185,7 +171,7 @@ matches=$(printf '%s' "$out" | awk '
     }
     END { print count }
 ')
-[ "$matches" = 0 ] || fail "gemini: \${WORD} pattern still matchable in deep-review output (count=$matches) — Gemini will refuse to load"
+[ "$matches" = 0 ] || fail "agy: \${WORD} pattern still matchable in deep-review output (count=$matches) — Antigravity will refuse to load"
 
 # codex-agents-md: takes multiple bases, emits AGENTS.md
 out=$("$renderers/codex-agents-md.sh" \
